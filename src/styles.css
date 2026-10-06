@@ -1,0 +1,537 @@
+@import "tailwindcss" source(none);
+@source "../src";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+/* Laptop-height screens (1366×768, 1280×720): tall full-height panels like
+   the login brand panel tighten up here instead of being cut off. */
+@custom-variant short (@media (max-height: 820px));
+/* Shorter still — a laptop with display scaling or browser zoom on, where the
+   visible page can be barely 550px tall. */
+@custom-variant tiny (@media (max-height: 660px));
+
+@theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary-soft: var(--primary-soft);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-muted: var(--sidebar-muted);
+  --color-success: var(--success);
+  --color-success-soft: var(--success-soft);
+  --color-warning: var(--warning);
+  --color-warning-soft: var(--warning-soft);
+  --color-info: var(--info);
+  --color-info-soft: var(--info-soft);
+  --color-brand: var(--brand);
+  --color-brand-foreground: var(--brand-foreground);
+}
+
+:root {
+  --radius: 0.5rem;
+
+  /* Mobile bottom tab bar: row height + the clearance BELOW the tab row (for
+     the home-indicator gesture area), defined ONCE so the bar
+     (MobileBottomNav) and the content padding that makes room for it
+     (AppShell's <main>) can never drift apart. The client found the full
+     safe-area inset (~34px) far too much empty space under the tabs, so this
+     is a small fixed clearance — enough to keep the labels off the very edge
+     without a tall dead band. Tune this single value up/down to taste. */
+  --mobile-nav-height: 52px;
+  --mobile-nav-safe: 10px;
+
+  /* ── M Décor ───────────────────────────────────────────────────────
+     Taken off the logo rather than chosen: its wordmark indigo is #17038C
+     (oklch 0.30 0.193 270). The mark's red, amber and green are left to the
+     mark itself — they are already success / warning / destructive here, so
+     the brand stays the one colour nothing else means.
+
+     Interactive indigo is lifted to L 0.42: the logo's own value is so dark a
+     button reads as black, and white on L 0.42 is still well over 7:1. The
+     logo's true indigo is kept for the deep end of the brand gradient. The
+     neutrals carry a faint cool cast of the same hue, so white surfaces sit
+     under the mark rather than beside it. */
+  --background: oklch(0.985 0.003 275);
+  --foreground: oklch(0.25 0.015 272);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.25 0.015 272);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.25 0.015 272);
+
+  --primary: oklch(0.42 0.2 272);
+  --primary-foreground: oklch(0.99 0 0);
+  --primary-soft: oklch(0.955 0.03 275);
+
+  --secondary: oklch(0.96 0.006 275);
+  --secondary-foreground: oklch(0.3 0.015 272);
+  --muted: oklch(0.965 0.005 275);
+  --muted-foreground: oklch(0.52 0.015 272);
+  --accent: oklch(0.955 0.025 275);
+  --accent-foreground: oklch(0.38 0.18 272);
+
+  /* The logo's own red, deepened: delete must read as danger, never as brand. */
+  --destructive: oklch(0.56 0.21 25);
+  --destructive-foreground: oklch(0.99 0 0);
+
+  --border: oklch(0.9 0.008 275);
+  --input: oklch(0.92 0.008 275);
+  --ring: oklch(0.42 0.2 272);
+
+  --success: oklch(0.55 0.15 150);
+  --success-soft: oklch(0.95 0.05 150);
+  --warning: oklch(0.75 0.15 75);
+  --warning-soft: oklch(0.96 0.06 80);
+  /* Pushed toward cyan so an info badge never reads as a brand button. */
+  --info: oklch(0.55 0.12 225);
+  --info-soft: oklch(0.95 0.03 225);
+
+  /* Brand gradient (topbar / hero): from the interactive indigo down to the
+     logo's own wordmark indigo — brighter at the top-left, deeper at the
+     bottom-right. */
+  --brand: oklch(0.42 0.2 272);
+  --brand-foreground: oklch(0.99 0 0);
+  --gradient-brand: linear-gradient(135deg, oklch(0.46 0.21 274), oklch(0.3 0.193 270));
+  --gradient-primary: linear-gradient(135deg, oklch(0.48 0.21 274), oklch(0.36 0.2 270));
+  --gradient-success: linear-gradient(135deg, oklch(0.6 0.16 150), oklch(0.48 0.15 160));
+  --gradient-warning: linear-gradient(135deg, oklch(0.75 0.16 70), oklch(0.62 0.16 55));
+  --gradient-info: linear-gradient(135deg, oklch(0.6 0.12 225), oklch(0.48 0.13 235));
+
+  --shadow-card: 0 1px 2px 0 oklch(0.2 0.03 272 / 0.04), 0 1px 3px 0 oklch(0.2 0.03 272 / 0.06);
+  --shadow-elevated:
+    0 4px 12px -2px oklch(0.2 0.03 272 / 0.08), 0 2px 6px -1px oklch(0.2 0.03 272 / 0.04);
+
+  /* Sidebar: white with an indigo accent bar for a professional look */
+  --sidebar: oklch(1 0 0);
+  --sidebar-foreground: oklch(0.3 0.015 272);
+  --sidebar-muted: oklch(0.55 0.015 272);
+  --sidebar-accent: oklch(0.955 0.03 275);
+  --sidebar-accent-foreground: oklch(0.4 0.2 272);
+  --sidebar-border: oklch(0.92 0.008 275);
+}
+
+.dark {
+  /* The same indigo, the other way up: deep indigo-tinted surfaces, and a
+     lighter indigo for anything interactive — the text on it is dark, not
+     white, so the bright value is the readable one. */
+  --background: oklch(0.18 0.02 272);
+  --foreground: oklch(0.95 0.006 275);
+  --card: oklch(0.225 0.022 272);
+  --card-foreground: oklch(0.95 0.006 275);
+  --popover: oklch(0.225 0.022 272);
+  --popover-foreground: oklch(0.95 0.006 275);
+  --primary: oklch(0.72 0.14 278);
+  --primary-foreground: oklch(0.18 0.04 272);
+  --primary-soft: oklch(0.32 0.08 275);
+  --secondary: oklch(0.28 0.02 272);
+  --secondary-foreground: oklch(0.95 0.006 275);
+  --muted: oklch(0.28 0.02 272);
+  --muted-foreground: oklch(0.7 0.015 275);
+  --accent: oklch(0.31 0.06 275);
+  --accent-foreground: oklch(0.95 0.006 275);
+  --border: oklch(0.31 0.02 272);
+  --input: oklch(0.31 0.02 272);
+  --ring: oklch(0.72 0.14 278);
+  --sidebar: oklch(0.205 0.022 272);
+  --sidebar-foreground: oklch(0.92 0.006 275);
+  --sidebar-muted: oklch(0.67 0.015 275);
+  --sidebar-accent: oklch(0.32 0.08 275);
+  --sidebar-accent-foreground: oklch(0.99 0 0);
+  --sidebar-border: oklch(0.28 0.02 272);
+}
+
+@layer base {
+  * {
+    border-color: var(--color-border);
+  }
+  html,
+  body,
+  #root {
+    height: 100%;
+    /* AppShell's own `<main>` (and each page's own inner overflow-auto
+       region) is the only thing that should ever scroll — the outer
+       page/body must not be independently scrollable at all. Without this,
+       mobile Safari's dynamic address bar (100vh not matching the real
+       visible viewport) or an elastic overscroll bounce could occasionally
+       let the whole page — header included, since it's normal-flow content
+       sitting above `<main>`, not actually pinned — drift with a scroll
+       gesture that was meant to only scroll the content underneath it. */
+    overflow: hidden;
+    overscroll-behavior: none;
+  }
+  body {
+    background-color: var(--color-background);
+    color: var(--color-foreground);
+    font-family:
+      "Inter",
+      ui-sans-serif,
+      system-ui,
+      -apple-system,
+      "Segoe UI",
+      Roboto,
+      sans-serif;
+    font-size: 13px;
+    -webkit-font-smoothing: antialiased;
+  }
+  kbd {
+    display: inline-flex;
+    align-items: center;
+    background: color-mix(in oklch, currentColor 8%, transparent);
+    border: 1px solid color-mix(in oklch, currentColor 18%, transparent);
+    border-bottom-width: 2px;
+    border-radius: 3px;
+    padding: 0 4px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    line-height: 1.4;
+    font-size: 10px;
+  }
+  input,
+  select,
+  textarea {
+    font-size: 13px;
+  }
+  ::-webkit-scrollbar {
+    width: 1px;
+    height: 1px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--color-border);
+    border-radius: 9999px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--color-muted-foreground);
+  }
+  ::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+}
+
+@utility bg-gradient-brand {
+  background-image: var(--gradient-brand);
+}
+@utility bg-gradient-primary {
+  background-image: var(--gradient-primary);
+}
+@utility bg-gradient-success {
+  background-image: var(--gradient-success);
+}
+@utility bg-gradient-warning {
+  background-image: var(--gradient-warning);
+}
+@utility bg-gradient-info {
+  background-image: var(--gradient-info);
+}
+@utility shadow-card {
+  box-shadow: var(--shadow-card);
+}
+@utility shadow-elevated {
+  box-shadow: var(--shadow-elevated);
+}
+
+@utility data-table {
+  & th {
+    /* Solid, not color-mixed — this is sticky, so a translucent background
+       would let scrolled-past rows show through underneath it. */
+    background: var(--color-muted);
+    font-weight: 600;
+    text-align: left;
+    padding: 8px 16px;
+    border-bottom: 1px solid var(--color-border);
+    position: sticky;
+    top: 0;
+    /* Above the footer and the pinned column — see the stacking note below. */
+    z-index: 3;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--color-muted-foreground);
+  }
+  & td {
+    padding: 6px 16px;
+    border-bottom: 1px solid var(--color-border);
+    vertical-align: middle;
+    /* A cell wrapping to two lines makes that one row taller than every
+       other row — with large amounts (this client deals in lakhs/crores)
+       that happened constantly. Cells that need to wrap (long names) opt
+       back in per-column; the safe default for a data table is one line,
+       scrolling horizontally if a column is genuinely too narrow. */
+    white-space: nowrap;
+  }
+  & tbody tr:last-child td {
+    border-bottom: none;
+  }
+  & tbody tr:hover {
+    background: color-mix(in oklch, var(--color-accent) 70%, transparent);
+  }
+  & tbody tr[data-selected="true"] {
+    background: color-mix(in oklch, var(--color-primary) 12%, transparent);
+  }
+  & tfoot {
+    position: sticky;
+    bottom: 0;
+    /* Three things in this table are sticky and they DO overlap: the header
+       row, the footer row, and the pinned last column. Without a stated
+       order it falls out of DOM order and the body wins — a pinned body cell
+       (z-index 1) was painted straight over the totals strip, putting a
+       row's pencil and bin in the footer's Action corner. Bottom to top:
+       pinned body cells 1, footer 2, header 3, pinned corners on top of
+       their own row. */
+    z-index: 2;
+  }
+  /* A pinned last column — the Action buttons, which on a table wider than
+     the panel otherwise sit past the right edge where nobody scrolls to.
+     Each context needs its OWN opaque background, because a sticky cell is
+     painted over whatever scrolls under it: a single class could not follow
+     the row's hover and selected colours, so it is done here. */
+  & table[data-pin-last] th:last-child,
+  & table[data-pin-last] td:last-child {
+    position: sticky;
+    right: 0;
+    box-shadow: -8px 0 8px -8px rgb(0 0 0 / 0.14);
+  }
+  & table[data-pin-last] thead th:last-child {
+    z-index: 4;
+  }
+  & table[data-pin-last] tbody td:last-child {
+    z-index: 1;
+    background: var(--color-card);
+  }
+  & table[data-pin-last] tbody tr:hover td:last-child {
+    background: color-mix(in oklch, var(--color-accent) 70%, var(--color-card));
+  }
+  & table[data-pin-last] tbody tr[data-selected="true"] td:last-child {
+    background: color-mix(in oklch, var(--color-primary) 12%, var(--color-card));
+  }
+  & table[data-pin-last] tfoot td:last-child {
+    z-index: 3;
+    background: color-mix(in oklch, var(--color-foreground) 6%, var(--color-background));
+  }
+
+  & tfoot td {
+    /* Same reasoning as thead — sticky footer needs an opaque background.
+       Darker than --color-muted (which is barely off-white) and given more
+       vertical room than the compact data rows — this is the one row that
+       needs to read as "the summary," and with no bold/color left to lean
+       on, spacing + a visibly different background is what has to do it. */
+    background: color-mix(in oklch, var(--color-foreground) 6%, var(--color-background));
+    padding: 11px 16px;
+    border-top: 2px solid var(--color-border);
+    border-bottom: none;
+    font-size: 13px;
+  }
+}
+
+/* ===== Print styles =====
+   .print-area    — hidden on screen, becomes the printed page (embedded print copies)
+   .print-visible — shown on screen normally AND becomes the printed page (detail sheets, statements, reports) */
+@media print {
+  @page {
+    size: A4;
+    margin: 0;
+  }
+  html,
+  body {
+    background: #fff !important;
+  }
+  /* The screen shell locks html/body/#root to the viewport (height: 100% +
+     overflow: hidden, see @layer base) so only <main> ever scrolls. Printing
+     lays the whole document out on paper instead — left locked, a statement
+     longer than one screen clips to a single printed page. */
+  html,
+  body,
+  #root {
+    height: auto !important;
+    overflow: visible !important;
+  }
+  body * {
+    visibility: hidden !important;
+  }
+  .print-area,
+  .print-area *,
+  .print-visible,
+  .print-visible * {
+    visibility: visible !important;
+  }
+  .print-area,
+  .print-visible {
+    position: absolute !important;
+    left: 0;
+    top: 0;
+    right: 0;
+    width: 100%;
+    max-width: none !important;
+    padding: 12mm;
+    box-sizing: border-box;
+    color: #000;
+    background: #fff;
+    font-size: 12px;
+    border: none !important;
+    box-shadow: none !important;
+    overflow: visible !important;
+  }
+  /* Long reports: inner scroll wrappers (max-height/overflow) must not clip
+     the printout to one screenful */
+  .print-visible *,
+  .print-area * {
+    max-height: none !important;
+    overflow: visible !important;
+  }
+  .no-print {
+    display: none !important;
+  }
+  /* useFitScale's mobile "shrink to fit" wrapper must not survive into
+     print — a transform on an ancestor creates a new containing block for
+     .print-visible's position:absolute, which would position the printed
+     page relative to this wrapper's (scaled, on-screen-only) box instead of
+     the real page. Verified directly with an isolated Puppeteer check
+     across the PDF pipeline's own render and native print triggered from a
+     narrow phone viewport — this override wins in both. */
+  .preview-fit-scale {
+    transform: none !important;
+    width: auto !important;
+    height: auto !important;
+  }
+}
+.print-area {
+  display: none;
+}
+@media print {
+  .print-area {
+    display: block;
+  }
+}
+
+/* No spinner arrows on any number input — billing keyboards, not steppers */
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+input[type="number"] {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+
+/* Room to breathe when the keyboard scrolls something into view.
+ *
+ * `scrollIntoView({block:"nearest"})` stops the moment an element is
+ * technically visible, which on these pages means flush against the sticky
+ * footer that carries Save — visible, and unreadable. A scroll margin makes
+ * "nearest" leave a gap instead, so the field it just reached is clear of
+ * the bar underneath it. */
+input,
+select,
+textarea,
+button,
+[role="radio"],
+[role="combobox"] {
+  scroll-margin-block: 5rem;
+}
+
+/* A phone is operated with a thumb, not a mouse pointer.
+ *
+ * Measured rather than guessed: at 390px the Parties screen had fourteen
+ * controls smaller than 40px and four of them were 26px square. Apple and
+ * Google both publish 44px as the minimum, and the gap between 26 and 44 is
+ * the difference between pressing edit and pressing delete.
+ *
+ * The shared Button, Field and mode pills carry their own phone sizes. This
+ * covers everything hand-rolled — the icon buttons in a list row, the filter
+ * chips, the pager — so a control added later is the right size without
+ * anyone remembering. Desktop is untouched: the app keeps its compact 32px
+ * from `sm:` up, where a pointer is doing the aiming.
+ *
+ * `data-compact` opts a control out, for the rare one that genuinely must
+ * stay inside something small. Nothing uses it yet; it exists so the answer
+ * to a cramped case is not "delete the rule". */
+@media (max-width: 639px) {
+  button:not([data-compact]),
+  select:not([data-compact]),
+  [role="button"]:not([data-compact]) {
+    min-height: 44px;
+  }
+
+  /* An icon on its own has no text to widen it, and a 44px-tall button 26px
+     wide is still a miss in one direction. */
+  /* An icon on its own has no text to widen it, and a 44px-tall button 26px
+     wide is still a miss in one direction. `:empty`-ish rather than
+     svg:only-child, because several of these carry a badge dot alongside the
+     icon and were still 36px wide with the narrower rule. */
+  button:not([data-compact]):not(:has(> :not(svg):not(span[class*="absolute"]))),
+  [role="button"]:not([data-compact]):not(:has(> :not(svg):not(span[class*="absolute"]))) {
+    min-width: 44px;
+  }
+}
+
+/* Nothing zooms out from under the person typing in it.
+ *
+ * iOS Safari zooms the whole page the instant a text box smaller than 16px is
+ * focused, and it does not zoom back out. Tap a box, the layout slides
+ * sideways, and every tap after that lands somewhere other than where it
+ * looked. 16px is the exact threshold, so this is the whole fix.
+ *
+ * Scoped to phones, because on a desk the compact type is doing real work:
+ * the item table fits nine columns at 13px and would not at 16. Checkboxes
+ * and radios have no text to zoom toward and keep their size.
+ *
+ * The height is the same argument as the buttons above — a 32px box is a
+ * comfortable target under a pointer and a miss under a thumb. */
+@media (max-width: 639px) {
+  input:not([type="checkbox"]):not([type="radio"]):not([data-compact]),
+  select:not([data-compact]),
+  textarea:not([data-compact]) {
+    font-size: 16px;
+    min-height: 44px;
+  }
+}
+
+/* A legibility floor on a phone, not a redesign.
+ *
+ * The app's smallest two steps — 10px and 11px — are fine under a monitor at
+ * arm's length and are what secondary text uses throughout: a party's phone
+ * number in the picker, an invoice number, a field hint. On a phone held at
+ * arm's length in a shop they are the lines staff squint at, and those are
+ * exactly the ones they have to read correctly to pick the right row.
+ *
+ * One step up, to 12px, and only below `sm`. Deliberately not a sweep through
+ * a hundred call sites: the intent at each of them ("this is secondary") is
+ * right and should stay written where it is — what changes is how small
+ * "secondary" is allowed to get on a small screen. */
+@media (max-width: 639px) {
+  :is(
+    .text-\[9px\],
+    .text-\[9\.5px\],
+    .text-\[10px\],
+    .text-\[10\.5px\],
+    .text-\[11px\],
+    .text-\[11\.5px\]
+  ) {
+    font-size: 12px;
+  }
+}

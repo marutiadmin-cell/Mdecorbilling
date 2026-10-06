@@ -1,0 +1,36 @@
+rules_version = '2';
+
+/**
+ * Firebase Storage — the document vault's files.
+ *
+ * PUBLISH THIS. Storage defaults to denying everything, and the symptom is a
+ * `storage/unauthorized` on the first upload. The app turns that into a
+ * sentence pointing back at this file, but the file still has to be pasted
+ * into the Firebase console (Storage → Rules) or deployed with the CLI.
+ *
+ * Permission is deliberately coarser than Firestore's: any signed-in member
+ * of this business may read and write the files. Firestore holds the RECORD —
+ * what each file is called and whether it exists at all — and that is where
+ * the per-module permission is enforced. Someone without the `documents`
+ * permission cannot see a path here to ask for.
+ */
+service firebase.storage {
+  match /b/{bucket}/o {
+    match /business-docs/{docId}/{fileName} {
+      allow read: if request.auth != null;
+
+      // The same 25MB ceiling the app enforces before it starts uploading.
+      // Repeated here because a client-side check is a courtesy, not a rule:
+      // it is the thing anybody can skip.
+      allow write: if request.auth != null
+                   && request.resource.size < 25 * 1024 * 1024;
+
+      allow delete: if request.auth != null;
+    }
+
+    // Nothing else is served from this bucket.
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

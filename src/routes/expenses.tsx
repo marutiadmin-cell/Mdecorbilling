@@ -1,0 +1,725 @@
+import { createFileRoute } from "@tanstack/react-router";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { PageHeader } from "@/components/PageHeader";
+import { DataTable, type Column } from "@/components/DataTable";
+import { usePagination } from "@/hooks/usePagination";
+import { ExpenseRepo, BankRepo, PayeeRepo, CompanyRepo } from "@/repositories";
+import { useRepoData, useRepoMemo } from "@/hooks/useRepoData";
+import { newBatch, commitBatch, genId } from "@/repositories/base";
+import type { Expense, BankAccount, Payee, PaymentSplit } from "@/types";
+import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Field } from "@/components/Field";
+import { NumField } from "@/components/NumInput";
+import {
+  Select,
+  SelectTrigger,
+  SelectValue,
+  SelectContent,
+  SelectItem,
+} from "@/components/ui/select";
+import { ModePills } from "@/components/ModePills";
+import { fmtMode } from "@/lib/paymentMode";
+import { fmtDate, fmtDateShort, fmtMoney, today } from "@/lib/format";
+import { Plus, Receipt, Trash2, Pencil } from "lucide-react";
+import { toast } from "sonner";
+import { useHighlightScroll } from "@/hooks/useHighlightScroll";
+import { bankParts, splitProblems, largestSplitMode, describePayment } from "@/lib/paymentSplit";
+import { SplitPaymentRows } from "@/components/SplitPaymentRows";
+import { usePermissions } from "@/hooks/usePermissions";
+
+/** An account's name for display. The word "Bank" three times over is
+ *  exactly what a split is meant to stop being ambiguous. */
+const bankName = (id: string) => BankRepo.get(id)?.name;
+
+export const Route = createFileRoute("/expenses")({ component: ExpensesPage });
+
+function ExpensesPage() {
+  const { isOwner, canEdit, canDelete } = usePermissions();
+  const editAllowed = isOwner || canEdit("purchaseExpenses");
+  const deleteAllowed = isOwner || canDelete("purchaseExpenses");
+  const [rows, setRows] = useState<Expense[]>([]);
+  const [open, setOpen] = useState(false);
+  const [edit, setEdit] = useState<Expense | null>(null);
+  const refresh = () => setRows(ExpenseRepo.all());
+  const _repoV = useRepoData();
+  useEffect(refresh, [_repoV]);
+
+  const pg = usePagination(rows, "expenses");
+
+  const total = rows.reduce((s, r) => s + r.amount, 0);
+
+  const handleDelete = (r: Expense) => {
+    if (!deleteAllowed) {
+      toast.error("You don't have permission to delete expenses");
+      return;
+    }
+    const bankName =
+      r.paymentMode === "bank" && r.bankId ? (BankRepo.get(r.bankId)?.name ?? null) : null;
+    const msg = [
+      `Delete this expense?`,
+      "",
+      `${r.category} · ${fmtMoney(r.amount)} · ${fmtDate(r.date)}`,
+      r.payeeName ? `Paid to ${r.payeeName}` : null,
+      bankName ? `${fmtMoney(r.amount)} will be added back to ${bankName}.` : null,
+    ]
+      .filter(Boolean)
+      .join("\n");
+    if (confirm(msg)) {
+      // Bail if another device already deleted it — the bank reversal below is
+      // a blind atomic increment, so running it twice would add the money back
+      // to the account twice.
+      const live = ExpenseRepo.get(r.id);
+      if (!live) {
+        toast.info("This expense was already deleted");
+        refresh();
+        return;
+      }
+      // Money that was taken off a specific bank account when this
+      // expense was recorded must be moved back on, or the account
+      // balance stays permanently wrong after the expense is gone.
+      const batch = newBatch();
+      // Every account it was paid from, not just one.
+      for (const [bankId, amount] of bankParts(live)) {
+        if (!BankRepo.get(bankId)) continue;
+        BankRepo.adjustFieldBatched(batch, bankId, "balance", amount);
+      }
+      ExpenseRepo.removeBatched(batch, live.id);
+      commitBatch(batch, "delete expense").then((ok) => {
+        refresh();
+        if (!ok) {
+          toast.error("Could not delete — reload and check before trying again");
+          return;
+        }
+        toast.success("Deleted");
+      });
+    }
+  };
+
+  const columns: Column<Expense>[] = [
+    {
+      key: "date",
+      label: "Date",
+      width: "120px",
+      render: (r) => <span className="whitespace-nowrap">{fmtDateShort(r.date)}</span>,
+      sortValue: (r) => r.date,
+    },
+    { key: "category", label: "Category", width: "160px", render: (r) => r.category },
+    {
+      key: "payee",
+      label: "Paid To",
+      width: "160px",
+      render: (r) => r.payeeName ?? "—",
+      sortValue: (r) => r.payeeName ?? "",
+    },
+    { key: "notes", label: "Notes", render: (r) => r.notes ?? "—" },
+    {
+      key: "mode",
+      label: "Mode",
+      width: "80px",
+      render: (r) => <span className="text-xs">{describePayment(r, bankName)}</span>,
+    },
+    {
+      key: "amount",
+      label: "Amount",
+      align: "right",
+      width: "120px",
+      render: (r) => fmtMoney(r.amount),
+      sortValue: (r) => r.amount,
+    },
+    {
+      // Every other list (Items, Parties, Payees, Payments, Bank) shows its
+      // row actions as buttons; expenses was the one that didn't, leaving
+      // edit as "click the row somewhere" and delete as Ctrl+Delete — both
+      // effectively invisible, which is why they read as missing entirely.
+      key: "actions",
+      label: "Action",
+      width: "90px",
+      align: "center",
+      render: (r) => (
+        <span className="inline-flex items-center justify-center gap-0.5">
+          {editAllowed && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                setEdit(r);
+                setOpen(true);
+              }}
+              className="h-7 w-7 inline-flex items-center justify-center rounded-md border border-transparent text-gray-400 transition hover:bg-primary-soft hover:text-primary hover:border-primary/25"
+              title="Edit expense"
+            >
+              <Pencil className="h-3.5 w-3.5" />
+            </button>
+          )}
+          {deleteAllowed && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                handleDelete(r);
+              }}
+              className="h-7 w-7 inline-flex items-center justify-center rounded-md border border-transparent text-gray-400 transition hover:bg-rose-50 hover:text-rose-600 hover:border-rose-200"
+              title="Delete expense"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+            </button>
+          )}
+        </span>
+      ),
+    },
+  ];
+
+  return (
+    <div className="flex flex-col h-full">
+      <PageHeader
+        title="Expenses"
+        subtitle={`${rows.length} entries · ${fmtMoney(total)} total`}
+        icon={<Receipt className="h-5 w-5" />}
+        iconClassName="text-warning"
+        actions={
+          editAllowed && (
+            <Button
+              size="sm"
+              onClick={() => {
+                setEdit(null);
+                setOpen(true);
+              }}
+              className="w-full sm:w-auto"
+            >
+              <Plus className="h-3.5 w-3.5" /> New Expense
+            </Button>
+          )
+        }
+      />
+      {/* Mobile card list — a table of 6 columns doesn't fit a phone; this
+          is the same data as one tappable card per expense instead. */}
+      <div className="md:hidden flex-1 overflow-auto">
+        {rows.length === 0 ? (
+          <div className="text-center py-16 text-gray-400">
+            <Receipt className="h-10 w-10 mx-auto mb-3 text-gray-200" />
+            <p className="font-medium">No expenses found</p>
+          </div>
+        ) : (
+          <div className="divide-y divide-gray-100">
+            {pg.paged.map((r) => (
+              <div
+                key={r.id}
+                onClick={() => {
+                  if (!editAllowed) return;
+                  setEdit(r);
+                  setOpen(true);
+                }}
+                className={`bg-white px-4 py-3 flex items-center gap-3 ${editAllowed ? "active:bg-gray-50 cursor-pointer" : ""}`}
+              >
+                <div className="h-9 w-9 rounded-full flex items-center justify-center shrink-0 bg-rose-50 text-rose-600">
+                  <Receipt className="h-4 w-4" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="font-semibold text-[13px] text-gray-800 truncate leading-tight">
+                      {r.category}
+                    </p>
+                    <p className="font-bold text-[13px] text-rose-600 tabular-nums shrink-0 leading-tight">
+                      −{fmtMoney(r.amount)}
+                    </p>
+                  </div>
+                  <p className="text-[11px] text-gray-400 mt-1 truncate">
+                    {fmtDate(r.date)} · {r.payeeName ?? "—"} · {describePayment(r, bankName)}
+                    {r.notes ? ` · ${r.notes}` : ""}
+                  </p>
+                </div>
+                {/* Tapping the card also edits, but an explicit pencil makes
+                    it discoverable — the client reported edit as missing. */}
+                {editAllowed && (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setEdit(r);
+                      setOpen(true);
+                    }}
+                    className="p-1.5 rounded hover:bg-blue-50 text-gray-300 hover:text-blue-600 transition shrink-0"
+                    title="Edit expense"
+                  >
+                    <Pencil className="h-3.5 w-3.5" />
+                  </button>
+                )}
+                {deleteAllowed && (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleDelete(r);
+                    }}
+                    className="p-1.5 rounded hover:bg-rose-50 text-gray-300 hover:text-rose-500 transition shrink-0 -mr-1.5"
+                    title="Delete expense"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Table (desktop) */}
+      <div className="hidden md:flex flex-1 min-h-0 p-6">
+        <DataTable
+          storageKey="expenses"
+          columns={columns}
+          rows={rows}
+          rowKey={(r) => r.id}
+          activateOnClick={editAllowed}
+          onRowActivate={
+            editAllowed
+              ? (r) => {
+                  setEdit(r);
+                  setOpen(true);
+                }
+              : undefined
+          }
+          onDelete={handleDelete}
+        />
+      </div>
+      <ExpenseDialog open={open} onOpenChange={setOpen} expense={edit} onSaved={refresh} />
+    </div>
+  );
+}
+
+function ExpenseDialog({
+  open,
+  onOpenChange,
+  expense,
+  onSaved,
+}: {
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  expense: Expense | null;
+  onSaved: () => void;
+}) {
+  const firstRef = useRef<HTMLButtonElement>(null);
+  const [f, setF] = useState<Partial<Expense>>({});
+  /** Rows, once the money came out in more than one way. */
+  const [splitRows, setSplitRows] = useState<PaymentSplit[] | null>(null);
+  const [saving, setSaving] = useState(false);
+  // Synchronous double-submit guard — prevents a same-tick double Enter from
+  // recording the expense (and its bank-balance move) twice.
+  const savingRef = useRef(false);
+  // Live reads — these used to be snapshotted when the dialog opened, so on a
+  // cold open (the app renders before collections load) "bank" mode had no
+  // account to pick and the save was blocked outright.
+  const banks = useRepoMemo(() => BankRepo.all());
+  const payees = useRepoMemo(() => PayeeRepo.all());
+  const [categories] = useState(() => CompanyRepo.get().expenseCategories ?? []);
+  // An older expense's category can be a free-text value from before this
+  // list existed, or one an admin has since removed — keep it selectable
+  // (rather than silently blanking it out) so editing never loses data.
+  const categoryOptions =
+    f.category && !categories.includes(f.category) ? [f.category, ...categories] : categories;
+  useEffect(() => {
+    if (open) {
+      // No paymentMode: a blank expense has not been paid any particular way
+      // yet, and pre-lighting Cash is how one gets recorded as cash by default.
+      setF(expense ?? { date: today(), amount: 0, category: "" });
+      // Same as the payment dialog: reopening a split expense must show the
+      // split, or saving it again quietly re-attributes the money.
+      setSplitRows(expense?.splits?.length ? expense.splits : null);
+      setPayeeQ(expense?.payeeName ?? "");
+      setSaving(false);
+      savingRef.current = false;
+      setTimeout(() => firstRef.current?.focus(), 50);
+    }
+  }, [open, expense]);
+
+  // Search-as-you-type for Bank Account — same combobox as the Sales/
+  // Purchase bill's bank picker, since a shop can have many accounts and a
+  // plain dropdown makes them scroll-hunt for one.
+  const [bankQ, setBankQ] = useState("");
+  const [bankOpen, setBankOpen] = useState(false);
+  const [bankIdx, setBankIdx] = useState(0);
+  /** Arrowing past the bottom edge used to move the highlight invisibly. */
+  const bankListRef = useRef<HTMLDivElement>(null);
+  useHighlightScroll(bankListRef, bankIdx, bankOpen);
+  useEffect(() => {
+    setBankQ(banks.find((b) => b.id === f.bankId)?.name ?? "");
+  }, [f.bankId, banks]);
+  const bankSuggests = banks.filter((b) => {
+    const q = bankQ.trim().toLowerCase();
+    if (!q) return true;
+    return b.name.toLowerCase().includes(q) || (b.accountNumber ?? "").toLowerCase().includes(q);
+  });
+  const selectBank = (b: BankAccount) => {
+    setF({ ...f, bankId: b.id });
+    setBankQ(b.name);
+    setBankOpen(false);
+  };
+
+  // Search-as-you-type for Payee — same combobox again. Unlike Bank Account,
+  // typing a name that doesn't match anyone is valid: it creates a new
+  // payee on save (mirrors how Sales/Purchase silently creates a new Party
+  // for an unrecognized name), since a payee is just a name, nothing more.
+  const [payeeQ, setPayeeQ] = useState("");
+  const [payeeOpen, setPayeeOpen] = useState(false);
+  const [payeeIdx, setPayeeIdx] = useState(0);
+  const payeeListRef = useRef<HTMLDivElement>(null);
+  useHighlightScroll(payeeListRef, payeeIdx, payeeOpen);
+  const payeeSuggests = payees.filter((p) => {
+    const q = payeeQ.trim().toLowerCase();
+    if (!q) return true;
+    return p.name.toLowerCase().includes(q);
+  });
+  const selectPayee = (p: Payee) => {
+    setF({
+      ...f,
+      payeeId: p.id,
+      payeeName: p.name,
+      // Only pre-fill Category from the payee's default when the field is
+      // still empty — never clobber a category the user already typed.
+      category: f.category?.trim() ? f.category : (p.defaultCategory ?? f.category),
+    });
+    setPayeeQ(p.name);
+    setPayeeOpen(false);
+  };
+
+  const save = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (savingRef.current) return;
+    if (!f.category?.trim()) {
+      toast.error("Category required");
+      return;
+    }
+    if (!f.amount || f.amount <= 0) {
+      toast.error("Amount must be positive");
+      return;
+    }
+    /* An expense that does not add up is not an expense. Refused rather than
+       corrected: only the person who paid it knows which figure is right. */
+    if (splitRows) {
+      const problems = splitProblems(splitRows, f.amount ?? 0);
+      if (problems.length) {
+        toast.error(problems[0].message, { duration: 8000 });
+        return;
+      }
+    }
+    /* Same rule as a receipt: with nothing pre-selected, an unanswered
+       question must be asked rather than answered with a default. */
+    if (!splitRows && !f.paymentMode) {
+      toast.error("Choose how this was paid — Cash or Bank");
+      return;
+    }
+    if (!splitRows && f.paymentMode === "bank" && !f.bankId) {
+      toast.error("Select which bank account this was paid from");
+      return;
+    }
+    if (!payeeQ.trim()) {
+      toast.error("Select or type who this was paid to");
+      return;
+    }
+    savingRef.current = true;
+    setSaving(true);
+
+    // Bank-balance changes, a possibly-new payee, and the expense record
+    // itself must all land together — a shared batch commits them
+    // atomically instead of independent writes that could partially fail.
+    const batch = newBatch();
+
+    // Editing: reverse the old bank-account effect first, before applying
+    // the new one below — handles both "same account, new amount" and
+    // "switched to a different account" correctly.
+    if (expense) {
+      for (const [bankId, amount] of bankParts(expense)) {
+        if (!BankRepo.get(bankId)) continue;
+        BankRepo.adjustFieldBatched(batch, bankId, "balance", amount);
+      }
+    }
+    /* Money paid out of every account this expense names. Read through the
+       same accessor as everything else, so a single-mode expense produces
+       exactly the one adjustment it always did. */
+    const attribution = {
+      amount: f.amount ?? 0,
+      paymentMode: f.paymentMode ?? "cash",
+      bankId: f.paymentMode === "bank" ? f.bankId : undefined,
+      splits: splitRows?.length ? splitRows : undefined,
+    };
+    for (const [bankId, amount] of bankParts(attribution)) {
+      BankRepo.adjustFieldBatched(batch, bankId, "balance", -amount);
+    }
+
+    // f.payeeId is only trusted if it was set by an actual pick from the
+    // list — the input's onChange clears it the moment the text is edited
+    // (same as the bank field), so a stale id from a previous selection can
+    // never get silently attached to a different typed name. A typed name
+    // that doesn't match anyone becomes a new payee — mirrors how Sales/
+    // Purchase silently creates a new Party for an unrecognized name.
+    const payeeName = payeeQ.trim();
+    let payeeId = f.payeeId;
+    if (!payeeId) {
+      const match = payees.find((p) => p.name.toLowerCase() === payeeName.toLowerCase());
+      payeeId = match?.id ?? genId();
+      if (!match) {
+        PayeeRepo.addBatched(batch, { id: payeeId, name: payeeName, defaultCategory: f.category });
+      }
+    }
+
+    const record: Partial<Expense> = {
+      ...f,
+      /* For a split expense the rows ARE the attribution and the legacy pair
+         is left empty, so there is one answer for where the money came from.
+         paymentMode keeps the largest part, so lists still say something
+         true about it. */
+      paymentMode: splitRows?.length ? largestSplitMode(splitRows) : f.paymentMode,
+      bankId: splitRows?.length ? undefined : f.paymentMode === "bank" ? f.bankId : undefined,
+      splits: splitRows?.length ? splitRows : undefined,
+      payeeId,
+      payeeName,
+    };
+    if (expense) {
+      ExpenseRepo.updateBatched(batch, expense.id, record);
+    } else {
+      ExpenseRepo.addBatched(batch, record as Omit<Expense, "id" | "createdAt">);
+    }
+    commitBatch(batch, "save expense").then((ok) => {
+      savingRef.current = false;
+      setSaving(false);
+      if (!ok) {
+        toast.error("Could not save — reload and check before trying again");
+        return;
+      }
+      toast.success(expense ? "Updated" : "Saved");
+      onSaved();
+      onOpenChange(false);
+    });
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{expense ? "Edit Expense" : "New Expense"}</DialogTitle>
+        </DialogHeader>
+        <form onSubmit={save} className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <label className="flex flex-col gap-1 text-[12px]">
+            <span className="text-muted-foreground font-medium">Category *</span>
+            <Select
+              value={f.category || undefined}
+              onValueChange={(v) => setF({ ...f, category: v })}
+            >
+              <SelectTrigger ref={firstRef} className="h-8 text-sm">
+                <SelectValue placeholder="Select category…" />
+              </SelectTrigger>
+              <SelectContent>
+                {categoryOptions.map((cat) => (
+                  <SelectItem key={cat} value={cat}>
+                    {cat}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {categoryOptions.length === 0 && (
+              <p className="text-[11px] text-amber-600">
+                No categories set up yet — add one from Settings first.
+              </p>
+            )}
+          </label>
+          <div className="relative flex flex-col gap-1 text-[12px]">
+            <span className="text-muted-foreground font-medium">Paid To *</span>
+            <input
+              value={payeeQ}
+              onChange={(e) => {
+                setPayeeQ(e.target.value);
+                setPayeeOpen(true);
+                setPayeeIdx(0);
+                if (f.payeeId) setF({ ...f, payeeId: undefined });
+              }}
+              onFocus={() => setPayeeOpen(true)}
+              onBlur={() => setTimeout(() => setPayeeOpen(false), 150)}
+              onKeyDown={(ev) => {
+                if (ev.key === "ArrowDown") {
+                  ev.preventDefault();
+                  setPayeeIdx((i) => Math.min(payeeSuggests.length - 1, i + 1));
+                } else if (ev.key === "ArrowUp") {
+                  ev.preventDefault();
+                  setPayeeIdx((i) => Math.max(0, i - 1));
+                } else if (ev.key === "Enter") {
+                  ev.preventDefault();
+                  if (payeeSuggests[payeeIdx]) {
+                    selectPayee(payeeSuggests[payeeIdx]);
+                  }
+                }
+              }}
+              placeholder="Employee, landlord, vendor…"
+              className="h-8 px-3 border rounded-md bg-background focus:border-primary focus:ring-2 focus:ring-ring/20 outline-none text-sm"
+            />
+            {payeeOpen && payeeSuggests.length > 0 && (
+              <div
+                ref={payeeListRef}
+                className="absolute z-20 top-full left-0 right-0 mt-1 border rounded-md bg-popover shadow-elevated max-h-56 overflow-auto"
+              >
+                {payeeSuggests.map((p, i) => (
+                  <div
+                    key={p.id}
+                    data-opt={i}
+                    onMouseDown={(ev) => {
+                      ev.preventDefault();
+                      selectPayee(p);
+                    }}
+                    className={`px-3 py-2 text-sm cursor-pointer ${i === payeeIdx ? "bg-accent" : "hover:bg-accent"}`}
+                  >
+                    {p.name}
+                  </div>
+                ))}
+              </div>
+            )}
+            {payeeOpen && payeeSuggests.length === 0 && payeeQ.trim() && (
+              <p className="absolute z-20 top-full left-0 right-0 mt-1 border rounded-md bg-popover shadow-elevated px-3 py-2 text-xs text-primary">
+                New payee — "{payeeQ.trim()}" will be added
+              </p>
+            )}
+          </div>
+          <Field
+            label="Date"
+            type="date"
+            value={f.date ?? today()}
+            onChange={(e) => setF({ ...f, date: e.target.value })}
+          />
+          <NumField
+            label="Amount *"
+            value={f.amount ?? 0}
+            onValue={(n) => setF({ ...f, amount: n })}
+          />
+          <label className="flex flex-col gap-1 text-[12px]">
+            <span className="text-muted-foreground font-medium">Payment Mode</span>
+            <div className="flex items-center h-8">
+              <ModePills
+                value={f.paymentMode}
+                onChange={(m) => {
+                  setF({ ...f, paymentMode: m, bankId: m === "bank" ? f.bankId : undefined });
+                }}
+                modes={["cash", "bank"]}
+              />
+            </div>
+          </label>
+          {(f.amount ?? 0) > 0 && !splitRows && (
+            <button
+              type="button"
+              onClick={() =>
+                setSplitRows([
+                  {
+                    mode: f.paymentMode ?? "cash",
+                    amount: f.amount ?? 0,
+                    bankId: f.paymentMode === "bank" ? f.bankId : undefined,
+                  },
+                ])
+              }
+              className="self-start text-[11px] font-medium text-primary hover:underline"
+            >
+              Split across cash and bank
+            </button>
+          )}
+          {splitRows && (
+            <div className="flex flex-col gap-1 text-[12px]">
+              <div className="flex items-center justify-between gap-2">
+                <span className="font-semibold text-gray-600">How it was paid</span>
+                <button
+                  type="button"
+                  onClick={() => setSplitRows(null)}
+                  className="text-[11px] text-gray-500 hover:underline"
+                >
+                  Back to one payment
+                </button>
+              </div>
+              <SplitPaymentRows
+                rows={splitRows}
+                onChange={setSplitRows}
+                total={f.amount ?? 0}
+                banks={banks}
+                label="Amount paid"
+              />
+            </div>
+          )}
+          {!splitRows && f.paymentMode === "bank" && (
+            <div className="relative flex flex-col gap-1 text-[12px]">
+              <span className="text-muted-foreground font-medium">Bank Account *</span>
+              <input
+                value={bankQ}
+                onChange={(e) => {
+                  setBankQ(e.target.value);
+                  setBankOpen(true);
+                  setBankIdx(0);
+                  if (f.bankId) setF({ ...f, bankId: undefined });
+                }}
+                onFocus={() => setBankOpen(true)}
+                onBlur={() => setTimeout(() => setBankOpen(false), 150)}
+                onKeyDown={(e) => {
+                  if (e.key === "ArrowDown") {
+                    e.preventDefault();
+                    setBankIdx((i) => Math.min(bankSuggests.length - 1, i + 1));
+                  } else if (e.key === "ArrowUp") {
+                    e.preventDefault();
+                    setBankIdx((i) => Math.max(0, i - 1));
+                  } else if (e.key === "Enter") {
+                    e.preventDefault();
+                    if (bankSuggests[bankIdx]) {
+                      selectBank(bankSuggests[bankIdx]);
+                    }
+                  }
+                }}
+                placeholder="Search bank account…"
+                className="h-8 px-3 border rounded-md bg-background focus:border-primary focus:ring-2 focus:ring-ring/20 outline-none text-sm"
+              />
+              {bankOpen && bankSuggests.length > 0 && (
+                <div
+                  ref={bankListRef}
+                  className="absolute z-20 top-full left-0 right-0 mt-1 border rounded-md bg-popover shadow-elevated max-h-56 overflow-auto"
+                >
+                  {bankSuggests.map((b, i) => (
+                    <div
+                      key={b.id}
+                      data-opt={i}
+                      onMouseDown={(e) => {
+                        e.preventDefault();
+                        selectBank(b);
+                      }}
+                      className={`px-3 py-2 text-sm cursor-pointer ${i === bankIdx ? "bg-accent" : "hover:bg-accent"}`}
+                    >
+                      {b.name}
+                      {b.accountNumber ? ` — ${b.accountNumber}` : ""}
+                    </div>
+                  ))}
+                </div>
+              )}
+              {bankOpen && bankQ && bankSuggests.length === 0 && (
+                <div className="absolute z-20 top-full left-0 right-0 mt-1 border rounded-md bg-popover shadow-elevated px-3 py-2 text-xs text-muted-foreground">
+                  No matching bank account
+                </div>
+              )}
+              {banks.length === 0 && (
+                <p className="text-[11px] text-amber-600">
+                  No bank accounts set up yet — add one from Bank Accounts first.
+                </p>
+              )}
+            </div>
+          )}
+          <div className="sm:col-span-2">
+            <Field
+              label="Notes"
+              value={f.notes ?? ""}
+              onChange={(e) => setF({ ...f, notes: e.target.value })}
+            />
+          </div>
+          <div className="sm:col-span-2 flex justify-end gap-2 mt-2">
+            <Button
+              type="button"
+              variant="outline"
+              disabled={saving}
+              onClick={() => onOpenChange(false)}
+            >
+              Cancel
+            </Button>
+            <Button type="submit" disabled={saving}>
+              {saving ? "Saving…" : "Save"}
+            </Button>
+          </div>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
