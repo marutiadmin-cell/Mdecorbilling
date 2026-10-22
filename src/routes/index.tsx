@@ -176,10 +176,11 @@ function Dashboard() {
   // Memoize the range so it's a stable reference while `period` is unchanged —
   // otherwise every downstream useMemo keyed on start/end (chart, COGS) would
   // see fresh objects each render and never actually cache.
-  const { start, end, label: periodLabel } = useMemo(
-    () => getPeriodRange(period, fy),
-    [period, fy.key],
-  );
+  const {
+    start,
+    end,
+    label: periodLabel,
+  } = useMemo(() => getPeriodRange(period, fy), [period, fy.key]);
 
   // Picking a year in the Topbar is the whole point of a global FY
   // selector — it must actually change what the Dashboard shows, not sit

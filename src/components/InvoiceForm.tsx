@@ -890,7 +890,9 @@ export function InvoiceForm({ mode, existing, initialDocType, fromEstimateId }: 
   const addCharge = () =>
     setAdditionalCharges([...(inv.additionalCharges ?? []), { label: "", amount: 0 }]);
   const updateCharge = (i: number, patch: Partial<AdditionalCharge>) => {
-    const next = (inv.additionalCharges ?? []).map((c, idx) => (idx === i ? { ...c, ...patch } : c));
+    const next = (inv.additionalCharges ?? []).map((c, idx) =>
+      idx === i ? { ...c, ...patch } : c,
+    );
     setAdditionalCharges(next);
   };
   const removeCharge = (i: number) =>
@@ -1130,7 +1132,9 @@ export function InvoiceForm({ mode, existing, initialDocType, fromEstimateId }: 
         let jvChanged = false;
         const nextLines = jv.lines.map((l) => {
           if (excess <= 0) return l;
-          const alloc = l.allocations?.find((a) => a.docId === existing.id && a.docKind === docKind);
+          const alloc = l.allocations?.find(
+            (a) => a.docId === existing.id && a.docKind === docKind,
+          );
           if (!alloc) return l;
           const reduceBy = Math.min(alloc.amount, excess);
           excess = r2(excess - reduceBy);
@@ -1428,7 +1432,8 @@ export function InvoiceForm({ mode, existing, initialDocType, fromEstimateId }: 
         // counting it here would block a legitimate reduction of the
         // invoice's own quantity just because an unrelated price correction
         // once named that same item.
-        if ((ret.originalRef ?? "").trim() !== existing.number.trim() || ret.isAdjustmentOnly) continue;
+        if ((ret.originalRef ?? "").trim() !== existing.number.trim() || ret.isAdjustmentOnly)
+          continue;
         for (const l of ret.lineItems) {
           returnedByItem.set(l.itemId, (returnedByItem.get(l.itemId) ?? 0) + l.qty);
         }

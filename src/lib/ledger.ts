@@ -26,7 +26,8 @@ const r2 = (n: number) => Math.round(n * 100) / 100;
  * Absent/"decrease" multiplies by 1 — every return saved before this field
  * existed behaves exactly as before.
  */
-const returnDirMul = (r: Pick<Return, "direction">): 1 | -1 => (r.direction === "increase" ? -1 : 1);
+const returnDirMul = (r: Pick<Return, "direction">): 1 | -1 =>
+  r.direction === "increase" ? -1 : 1;
 
 /** Sum of a payment's per-invoice allocations. Legacy payments (saved before
  * allocations existed) stored the linked invoice numbers in `ref` — if every
@@ -1284,8 +1285,7 @@ export function returnValueExTax(returns: Return[]): number {
   return r2(
     returns.reduce(
       (s, r) =>
-        s +
-        ((r.total || 0) - (r.gstEnabled === false ? 0 : r.taxAmount || 0)) * returnDirMul(r),
+        s + ((r.total || 0) - (r.gstEnabled === false ? 0 : r.taxAmount || 0)) * returnDirMul(r),
       0,
     ),
   );
@@ -1474,7 +1474,16 @@ export function hsnSummary(
   ) => {
     const split = splitTax(tax, kind);
     const key = `${hsn}__${rate}`;
-    const cur = map.get(key) ?? { hsn, rate, qty: 0, taxable: 0, cgst: 0, sgst: 0, igst: 0, tax: 0 };
+    const cur = map.get(key) ?? {
+      hsn,
+      rate,
+      qty: 0,
+      taxable: 0,
+      cgst: 0,
+      sgst: 0,
+      igst: 0,
+      tax: 0,
+    };
     cur.qty += sign * qty;
     cur.taxable += sign * taxable;
     cur.cgst += sign * split.cgst;
@@ -1496,8 +1505,8 @@ export function hsnSummary(
     const adjusted =
       inv.taxCalcVersion === 2
         ? allocateAcrossRateBuckets(buckets, (inv.shippingCharge ?? 0) - inv.discount).map(
-          (b, i) => ({ ...b, hsn: buckets[i].hsn, qty: buckets[i].qty }),
-        )
+            (b, i) => ({ ...b, hsn: buckets[i].hsn, qty: buckets[i].qty }),
+          )
         : buckets.map((b) => ({ ...b, tax: b.taxable * (b.rate / 100) }));
     for (const b of adjusted) merge(1, b.hsn, b.rate, b.qty, b.taxable, b.tax, kind);
   }

@@ -228,7 +228,9 @@ function AccountPicker({
 
   const typed = text.trim();
   const matches = typed
-    ? options.filter((o) => matchesQuery(typed, o.refName)).sort(byRelevance(typed, (o) => o.refName))
+    ? options
+        .filter((o) => matchesQuery(typed, o.refName))
+        .sort(byRelevance(typed, (o) => o.refName))
     : options;
   const exact = !!typed && options.some((o) => o.refName.toLowerCase() === typed.toLowerCase());
   const canCreate = !!typed && !exact;
@@ -654,8 +656,18 @@ function JournalVoucherDialog({
   // "what kind is this" as a separate question before "which one".
   const unifiedAccounts: UnifiedAccountOption[] = [
     { key: "cash", kind: "cash", refId: undefined, refName: "Cash" },
-    ...parties.map((p) => ({ key: `party:${p.id}`, kind: "party" as const, refId: p.id, refName: p.name })),
-    ...banks.map((b) => ({ key: `bank:${b.id}`, kind: "bank" as const, refId: b.id, refName: b.name })),
+    ...parties.map((p) => ({
+      key: `party:${p.id}`,
+      kind: "party" as const,
+      refId: p.id,
+      refName: p.name,
+    })),
+    ...banks.map((b) => ({
+      key: `bank:${b.id}`,
+      kind: "bank" as const,
+      refId: b.id,
+      refName: b.name,
+    })),
     ...expenseCategories.map((c) => ({
       key: `expense:${c}`,
       kind: "expense" as const,
@@ -772,7 +784,11 @@ function JournalVoucherDialog({
     }
 
     if (voucher) {
-      JournalVoucherRepo.updateBatched(batch, voucher.id, { date, narration: narr, lines: finalLines });
+      JournalVoucherRepo.updateBatched(batch, voucher.id, {
+        date,
+        narration: narr,
+        lines: finalLines,
+      });
     } else {
       const company = CompanyRepo.get();
       JournalVoucherRepo.addBatched(batch, {
@@ -823,7 +839,12 @@ function JournalVoucherDialog({
         </DialogHeader>
         <div className="flex flex-col gap-3">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <Field label="Date" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+            <Field
+              label="Date"
+              type="date"
+              value={date}
+              onChange={(e) => setDate(e.target.value)}
+            />
             <Field
               ref={narrationRef}
               label="Narration *"
@@ -848,90 +869,99 @@ function JournalVoucherDialog({
                 <tbody>
                   {lines.map((l) => (
                     <Fragment key={l.id}>
-                    <tr className="border-t">
-                      <td className="px-2 py-1.5">
-                        <AccountPicker
-                          value={l.refName}
-                          options={unifiedAccounts}
-                          onSelect={(sel) => {
-                            // An ACTUAL account change invalidates whatever
-                            // bill-wise adjustment was picked against the OLD
-                            // account's invoices. But onSelect now also
-                            // fires on blur/Tab-away (see AccountPicker) even
-                            // when nothing changed — e.g. tabbing through an
-                            // already-filled line — so only reset when the
-                            // account really is different, or that keyboard
-                            // navigation alone would silently wipe a
-                            // correctly-entered bill-wise adjustment.
-                            const changed = sel.kind !== l.kind || sel.refId !== l.refId;
-                            updateLine(l.id, { ...sel, allocations: changed ? [] : l.allocations });
-                          }}
-                          placeholder="Type a party, bank, cash, expense or account name..."
-                          ariaLabel="Account"
-                          className="h-8 w-full px-1.5 border rounded bg-background focus:border-primary outline-none"
-                        />
-                      </td>
-                      <td className="px-1 py-1.5">
-                        <NumInput
-                          value={l.debit}
-                          onValue={(n) => {
-                            const credit = n > 0 ? 0 : l.credit;
-                            updateLine(l.id, {
-                              debit: n,
-                              credit,
-                              allocations: clampAllocations(l.allocations ?? [], Math.max(n, credit)),
-                            });
-                          }}
-                          className="w-full h-8 px-1.5 text-right border rounded bg-background focus:border-primary outline-none"
-                        />
-                      </td>
-                      <td className="px-1 py-1.5">
-                        <NumInput
-                          value={l.credit}
-                          onValue={(n) => {
-                            const debit = n > 0 ? 0 : l.debit;
-                            updateLine(l.id, {
-                              credit: n,
-                              debit,
-                              allocations: clampAllocations(l.allocations ?? [], Math.max(n, debit)),
-                            });
-                          }}
-                          className="w-full h-8 px-1.5 text-right border rounded bg-background focus:border-primary outline-none"
-                        />
-                      </td>
-                      <td className="px-1 py-1.5">
-                        <input
-                          type="text"
-                          value={l.description ?? ""}
-                          onChange={(e) => updateLine(l.id, { description: e.target.value })}
-                          placeholder="Optional note for this line"
-                          className="w-full h-8 px-1.5 border rounded bg-background focus:border-primary outline-none text-[13px]"
-                        />
-                      </td>
-                      <td className="px-1 py-1.5 text-center">
-                        {lines.length > 2 && (
-                          <button
-                            type="button"
-                            onClick={() => removeLine(l.id)}
-                            className="text-destructive p-1 hover:bg-destructive/10 rounded"
-                          >
-                            <X className="h-3.5 w-3.5" />
-                          </button>
-                        )}
-                      </td>
-                    </tr>
-                    {l.kind === "party" && l.refId && (
-                      <tr className="border-t bg-muted/10">
-                        <td colSpan={5} className="px-3 py-2">
-                          <JournalBillWiseAdjustment
-                            line={l}
-                            sales={sales}
-                            purchases={purchases}
-                            onChange={(allocations) => updateLine(l.id, { allocations })}
+                      <tr className="border-t">
+                        <td className="px-2 py-1.5">
+                          <AccountPicker
+                            value={l.refName}
+                            options={unifiedAccounts}
+                            onSelect={(sel) => {
+                              // An ACTUAL account change invalidates whatever
+                              // bill-wise adjustment was picked against the OLD
+                              // account's invoices. But onSelect now also
+                              // fires on blur/Tab-away (see AccountPicker) even
+                              // when nothing changed — e.g. tabbing through an
+                              // already-filled line — so only reset when the
+                              // account really is different, or that keyboard
+                              // navigation alone would silently wipe a
+                              // correctly-entered bill-wise adjustment.
+                              const changed = sel.kind !== l.kind || sel.refId !== l.refId;
+                              updateLine(l.id, {
+                                ...sel,
+                                allocations: changed ? [] : l.allocations,
+                              });
+                            }}
+                            placeholder="Type a party, bank, cash, expense or account name..."
+                            ariaLabel="Account"
+                            className="h-8 w-full px-1.5 border rounded bg-background focus:border-primary outline-none"
                           />
                         </td>
+                        <td className="px-1 py-1.5">
+                          <NumInput
+                            value={l.debit}
+                            onValue={(n) => {
+                              const credit = n > 0 ? 0 : l.credit;
+                              updateLine(l.id, {
+                                debit: n,
+                                credit,
+                                allocations: clampAllocations(
+                                  l.allocations ?? [],
+                                  Math.max(n, credit),
+                                ),
+                              });
+                            }}
+                            className="w-full h-8 px-1.5 text-right border rounded bg-background focus:border-primary outline-none"
+                          />
+                        </td>
+                        <td className="px-1 py-1.5">
+                          <NumInput
+                            value={l.credit}
+                            onValue={(n) => {
+                              const debit = n > 0 ? 0 : l.debit;
+                              updateLine(l.id, {
+                                credit: n,
+                                debit,
+                                allocations: clampAllocations(
+                                  l.allocations ?? [],
+                                  Math.max(n, debit),
+                                ),
+                              });
+                            }}
+                            className="w-full h-8 px-1.5 text-right border rounded bg-background focus:border-primary outline-none"
+                          />
+                        </td>
+                        <td className="px-1 py-1.5">
+                          <input
+                            type="text"
+                            value={l.description ?? ""}
+                            onChange={(e) => updateLine(l.id, { description: e.target.value })}
+                            placeholder="Optional note for this line"
+                            className="w-full h-8 px-1.5 border rounded bg-background focus:border-primary outline-none text-[13px]"
+                          />
+                        </td>
+                        <td className="px-1 py-1.5 text-center">
+                          {lines.length > 2 && (
+                            <button
+                              type="button"
+                              onClick={() => removeLine(l.id)}
+                              className="text-destructive p-1 hover:bg-destructive/10 rounded"
+                            >
+                              <X className="h-3.5 w-3.5" />
+                            </button>
+                          )}
+                        </td>
                       </tr>
-                    )}
+                      {l.kind === "party" && l.refId && (
+                        <tr className="border-t bg-muted/10">
+                          <td colSpan={5} className="px-3 py-2">
+                            <JournalBillWiseAdjustment
+                              line={l}
+                              sales={sales}
+                              purchases={purchases}
+                              onChange={(allocations) => updateLine(l.id, { allocations })}
+                            />
+                          </td>
+                        </tr>
+                      )}
                     </Fragment>
                   ))}
                 </tbody>
@@ -961,7 +991,12 @@ function JournalVoucherDialog({
           )}
 
           <div className="flex justify-end gap-2 pt-1">
-            <Button type="button" variant="outline" disabled={saving} onClick={() => onOpenChange(false)}>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={saving}
+              onClick={() => onOpenChange(false)}
+            >
               Cancel
             </Button>
             <Button type="button" onClick={save} disabled={saving || !balanced}>
@@ -1083,7 +1118,13 @@ function BillPanel({
   hint: string;
   rows: { invoice: Invoice; due: number; applied: number }[];
   docKind: "sale" | "purchase";
-  onApply: (docId: string, docKind: "sale" | "purchase", number: string, due: number, amount: number) => void;
+  onApply: (
+    docId: string,
+    docKind: "sale" | "purchase",
+    number: string,
+    due: number,
+    amount: number,
+  ) => void;
 }) {
   if (!rows.length) return null;
   return (
