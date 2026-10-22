@@ -1006,6 +1006,7 @@ export function InvoiceForm({ mode, existing, initialDocType, fromEstimateId }: 
     const bankPaidNow = correctBankPaidAmount(
       { ...inv, id: existing?.id ?? "", paid } as Invoice,
       PaymentRepo.all(),
+      JournalVoucherRepo.all(),
     );
 
     /* A split that does not add up is not a document. Refused here rather
@@ -1098,13 +1099,18 @@ export function InvoiceForm({ mode, existing, initialDocType, fromEstimateId }: 
           0,
         ),
       );
+      // A settlement discount is inside `paid` too (payments.tsx adds
+      // amount + discount), so it counts toward what settles this bill.
+      // Leaving it out let a discount survive on a bill whose `paid` no
+      // longer covered it — the P&L kept the write-off while the party's
+      // balance did not move by it.
       const liveAllocated = r2(
         PaymentRepo.all().reduce(
           (s, p) =>
             s +
             (p.allocations ?? [])
               .filter((a) => a.invoiceId === existing.id)
-              .reduce((x, a) => x + a.amount, 0),
+              .reduce((x, a) => x + a.amount + (a.discount ?? 0), 0),
           0,
         ) + jvAllocated,
       );
@@ -1113,12 +1119,24 @@ export function InvoiceForm({ mode, existing, initialDocType, fromEstimateId }: 
         if (excess <= 0) break;
         const alloc = p.allocations?.find((a) => a.invoiceId === existing.id);
         if (!alloc) continue;
-        const reduceBy = Math.min(alloc.amount, excess);
+        const settledHere = r2(alloc.amount + (alloc.discount ?? 0));
+        const reduceBy = Math.min(settledHere, excess);
+        // The write-off goes first: it is not money, so a smaller bill simply
+        // needs less of it. Only then does real money become an advance.
+        const discountCut = Math.min(alloc.discount ?? 0, reduceBy);
+        const amountCut = r2(reduceBy - discountCut);
         const remaining = p
-          .allocations!.map((a) =>
-            a.invoiceId === existing.id ? { ...a, amount: r2(a.amount - reduceBy) } : a,
-          )
-          .filter((a) => a.amount > 0);
+          .allocations!.map((a) => {
+            if (a.invoiceId !== existing.id) return a;
+            const discount = r2((a.discount ?? 0) - discountCut);
+            return {
+              ...a,
+              amount: r2(a.amount - amountCut),
+              discount: discount > 0 ? discount : undefined,
+            };
+          })
+          // A discount-only allocation (amount 0) is still a real settlement.
+          .filter((a) => a.amount > 0 || (a.discount ?? 0) > 0);
         PaymentRepo.updateBatched(batch, p.id, {
           allocations: remaining.length ? remaining : undefined,
         });

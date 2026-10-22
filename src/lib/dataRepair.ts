@@ -49,8 +49,17 @@ export function planStockRepair(data: {
   for (const s of data.sales) for (const l of s.lineItems) add(l.itemId, -num(l.qty));
   for (const p of data.purchases) for (const l of p.lineItems) add(l.itemId, num(l.qty));
   // A sale return brings goods back in; a purchase return sends them out.
-  for (const r of data.saleReturns) for (const l of r.lineItems) add(l.itemId, num(l.qty));
-  for (const r of data.purchaseReturns) for (const l of r.lineItems) add(l.itemId, -num(l.qty));
+  // An adjustment-only note (a pure price/tax correction) moved no goods when
+  // it was saved (ReturnForm skips its stock), so it must not move any here —
+  // otherwise "Fix calculations" would push stock the wrong way.
+  for (const r of data.saleReturns) {
+    if (r.isAdjustmentOnly) continue;
+    for (const l of r.lineItems) add(l.itemId, num(l.qty));
+  }
+  for (const r of data.purchaseReturns) {
+    if (r.isAdjustmentOnly) continue;
+    for (const l of r.lineItems) add(l.itemId, -num(l.qty));
+  }
   for (const a of data.stockAdjustments) {
     add(a.itemId, a.type === "add" ? num(a.qty) : -num(a.qty));
   }

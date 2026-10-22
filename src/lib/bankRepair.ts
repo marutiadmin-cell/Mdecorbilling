@@ -1,4 +1,4 @@
-import { buildBankLedger, paidViaPayments } from "@/lib/ledger";
+import { buildBankLedger, settledAfterBilling } from "@/lib/ledger";
 import type { Invoice, Payment, BankAccount, BankTxn, Expense, JournalVoucher } from "@/types";
 
 const r2 = (n: number) => Math.round(n * 100) / 100;
@@ -13,7 +13,14 @@ const r2 = (n: number) => Math.round(n * 100) / 100;
  *
  * Kept here rather than inline in InvoiceForm so the save path, the repair
  * planner below and the audit harness can never drift apart. */
-export function correctBankPaidAmount(inv: Invoice, payments: Payment[]): number | undefined {
+export function correctBankPaidAmount(
+  inv: Invoice,
+  payments: Payment[],
+  /** A JV's bill-wise allocation is later money too — see settledAfterBilling.
+   *  Without it, re-saving a JV-settled bank bill credited the account with
+   *  the JV amount. */
+  journalVouchers: JournalVoucher[] = [],
+): number | undefined {
   /* A document that carries split rows has nothing to repair here: the rows
      ARE its attribution, they are already net of anything that arrived
      later, and the balance re-derivation below reads them through
@@ -24,7 +31,7 @@ export function correctBankPaidAmount(inv: Invoice, payments: Payment[]): number
      form happens to fill a field. */
   if (inv.paidSplits?.length) return undefined;
   if (inv.paymentMode !== "bank" || !inv.bankId) return undefined;
-  const viaPayments = paidViaPayments(payments).get(inv.id) ?? 0;
+  const viaPayments = settledAfterBilling([inv], payments, journalVouchers).get(inv.id) ?? 0;
   return Math.max(0, r2((inv.paid || 0) - viaPayments));
 }
 
@@ -84,7 +91,7 @@ export function planBankRepair(data: BankRepairData): BankRepairPlan {
 
   const scan = (list: Invoice[], kind: "sale" | "purchase") => {
     for (const inv of list) {
-      const correct = correctBankPaidAmount(inv, data.payments);
+      const correct = correctBankPaidAmount(inv, data.payments, data.journalVouchers ?? []);
       if (correct === undefined) continue;
       const stored = inv.bankPaidAmount ?? 0;
       // Tolerance of half a paisa — never rewrite a document over float dust.

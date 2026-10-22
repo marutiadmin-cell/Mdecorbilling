@@ -45,16 +45,24 @@ function InventoryPage() {
   SalesRepo.all().forEach((s) =>
     s.lineItems.forEach((l) => salesQty.set(l.itemId, (salesQty.get(l.itemId) ?? 0) + l.qty)),
   );
-  PurchaseReturnRepo.all().forEach((r) =>
-    r.lineItems.forEach((l) => salesQty.set(l.itemId, (salesQty.get(l.itemId) ?? 0) + l.qty)),
-  );
+  // Adjustment-only notes (price/tax corrections) moved no goods — skipped,
+  // exactly as ReturnForm skips them when saving.
+  PurchaseReturnRepo.all()
+    .filter((r) => !r.isAdjustmentOnly)
+    .forEach((r) =>
+      r.lineItems.forEach((l) => salesQty.set(l.itemId, (salesQty.get(l.itemId) ?? 0) + l.qty)),
+    );
   const purchaseQty = new Map<string, number>();
   PurchaseRepo.all().forEach((s) =>
     s.lineItems.forEach((l) => purchaseQty.set(l.itemId, (purchaseQty.get(l.itemId) ?? 0) + l.qty)),
   );
-  SaleReturnRepo.all().forEach((r) =>
-    r.lineItems.forEach((l) => purchaseQty.set(l.itemId, (purchaseQty.get(l.itemId) ?? 0) + l.qty)),
-  );
+  SaleReturnRepo.all()
+    .filter((r) => !r.isAdjustmentOnly)
+    .forEach((r) =>
+      r.lineItems.forEach((l) =>
+        purchaseQty.set(l.itemId, (purchaseQty.get(l.itemId) ?? 0) + l.qty),
+      ),
+    );
   StockAdjustmentRepo.all().forEach((a) => {
     const map = a.type === "add" ? purchaseQty : salesQty;
     map.set(a.itemId, (map.get(a.itemId) ?? 0) + a.qty);

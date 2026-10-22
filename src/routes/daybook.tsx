@@ -15,7 +15,7 @@ import {
   CompanyRepo,
   JournalVoucherRepo,
 } from "@/repositories";
-import { buildBankLedger, paidViaPayments } from "@/lib/ledger";
+import { buildBankLedger, settledAfterBilling } from "@/lib/ledger";
 import { fmtMoney, fmtDate, today, ymd } from "@/lib/format";
 import { printOrEscapeStandalone } from "@/lib/print";
 import { useAutoPrintFromUrl } from "@/hooks/useAutoPrintFromUrl";
@@ -140,8 +140,13 @@ function DaybookPage() {
     // invoice.paid already folds in amounts later applied via Payment
     // records (see ledger.ts) — if we used it as-is here, a payment
     // collected after billing would count twice: once inside the Sale row's
-    // cash figure, and again as its own Payment In/Out row below.
-    const applied = paidViaPayments(PaymentRepo.all());
+    // cash figure, and again as its own Payment In/Out row below. A Journal
+    // Voucher's bill-wise settlement is later money too (it moves no cash).
+    const applied = settledAfterBilling(
+      [...SalesRepo.all(), ...PurchaseRepo.all()],
+      PaymentRepo.all(),
+      JournalVoucherRepo.all(),
+    );
     for (const s of SalesRepo.all().filter((x) => x.date === date))
       list.push({
         created: s.createdAt,

@@ -73,6 +73,67 @@ export function paidViaPayments(payments: Payment[]): Map<string, number> {
   return map;
 }
 
+/**
+ * invoiceId → how much of that invoice a Journal Voucher's bill-wise
+ * allocations claim to have settled, as STORED on the voucher.
+ *
+ * A JV party line with allocations raises the bill's own `paid` (see
+ * applyAllocations in journal-vouchers.tsx) exactly like a Payment
+ * allocation does — so it is money that reached the bill AFTER billing, and
+ * every reader that splits `paid` into "taken at the counter" vs "arrived
+ * later" has to know about it. Read it through `settledAfterBilling`, which
+ * also clamps it; this raw map is the input to that.
+ */
+export function paidViaJournals(journalVouchers: JournalVoucher[]): Map<string, number> {
+  const map = new Map<string, number>();
+  for (const jv of journalVouchers) {
+    for (const l of jv.lines) {
+      if (l.kind !== "party") continue;
+      for (const a of l.allocations ?? []) {
+        map.set(a.docId, r2((map.get(a.docId) ?? 0) + (a.amount || 0)));
+      }
+    }
+  }
+  return map;
+}
+
+/**
+ * invoiceId → everything that settled the bill AFTER it was written: Payment
+ * allocations (amount + settlement discount) plus Journal Voucher bill-wise
+ * allocations.
+ *
+ * The counter's own share of a bill is `paid` minus this. Before JVs were
+ * counted here, a JV-settled bill looked as if its customer had paid at the
+ * counter: Cash on Hand gained money that never arrived, the party's balance
+ * dropped twice (once through `paid`, once through the JV line itself), and
+ * a re-save of a bank bill wrote the JV amount into `bankPaidAmount`.
+ *
+ * The JV part is clamped to what is actually inside `paid` beyond the
+ * payments. Vouchers saved before the save path stored the APPLIED amount
+ * could record more than the bill had left to settle (applyAllocations
+ * clamps to the live due but kept the requested figure), and only what was
+ * applied is really inside `paid`.
+ */
+export function settledAfterBilling(
+  invoices: Pick<Invoice, "id" | "paid">[],
+  payments: Payment[],
+  journalVouchers: JournalVoucher[] = [],
+): Map<string, number> {
+  const viaPayments = paidViaPayments(payments);
+  if (!journalVouchers.length) return viaPayments;
+  const viaJournals = paidViaJournals(journalVouchers);
+  if (!viaJournals.size) return viaPayments;
+  const out = new Map(viaPayments);
+  for (const inv of invoices) {
+    const jv = viaJournals.get(inv.id);
+    if (!jv) continue;
+    const pay = viaPayments.get(inv.id) ?? 0;
+    const room = Math.max(0, r2((inv.paid || 0) - pay));
+    out.set(inv.id, r2(pay + Math.min(jv, room)));
+  }
+  return out;
+}
+
 /** Total written off across a set of payments — "Discount Allowed" on money
  * coming in, "Discount Received" on money going out. Real profit impact:
  * the sale was booked at full value, so the waived part has to come back off
@@ -274,10 +335,30 @@ export function netPartyPositions(
   // already does: a Debit increases what they owe (same as a sale), a
   // Credit decreases it (same as a payment received) — see JournalLine's own
   // doc comment in src/types/index.ts.
-  for (const jv of data.journalVouchers ?? []) {
+  const jvs = data.journalVouchers ?? [];
+  for (const jv of jvs) {
     for (const l of jv.lines) {
       if (l.kind !== "party" || !l.refId) continue;
       entry(l.refId, l.refName).net += l.debit - l.credit;
+    }
+  }
+
+  // The part of a JV line that was applied to a bill also raised that
+  // bill's `paid`, which is already subtracted above — so it was counted
+  // twice. Give it back, the same way a Payment's allocated part is never
+  // added separately (only its advance is). See settledAfterBilling.
+  if (jvs.length) {
+    const viaPayments = paidViaPayments(data.payments);
+    const settled = settledAfterBilling([...data.sales, ...data.purchases], data.payments, jvs);
+    const viaJournal = (inv: Invoice) =>
+      r2((settled.get(inv.id) ?? 0) - (viaPayments.get(inv.id) ?? 0));
+    for (const s of data.sales) {
+      const j = viaJournal(s);
+      if (j) entry(s.partyId, s.partyName).net += j;
+    }
+    for (const p of data.purchases) {
+      const j = viaJournal(p);
+      if (j) entry(p.partyId, p.partyName).net -= j;
     }
   }
 
@@ -343,10 +424,14 @@ export function modeFlows(
   purchases: Invoice[],
   expenses: Expense[],
   payments: Payment[],
+  /** Optional — a JV's bill-wise allocation also reached the bill later and
+   *  must not be read as money taken at the counter. See settledAfterBilling. */
+  journalVouchers: JournalVoucher[] = [],
 ): FlowEntry[] {
   // Money allocated to an invoice AFTER it was billed belongs to the Payment
-  // that brought it, which appears in these flows under its own mode.
-  const applied = paidViaPayments(payments);
+  // (or Journal Voucher) that brought it — a Payment appears in these flows
+  // under its own mode; a JV moves no money of its own.
+  const applied = settledAfterBilling([...sales, ...purchases], payments, journalVouchers);
   const list: FlowEntry[] = [];
   for (const s of sales) {
     const direct = unbankedPart(s, mode, applied.get(s.id) ?? 0);
@@ -414,7 +499,7 @@ export function cashFlows(
    *  type "add" — no inversion, unlike bank's own passbook-style ledger. */
   journalVouchers: JournalVoucher[] = [],
 ): FlowEntry[] {
-  const list = modeFlows("cash", sales, purchases, expenses, payments);
+  const list = modeFlows("cash", sales, purchases, expenses, payments, journalVouchers);
   for (const a of adjustments) {
     list.push({
       date: a.date,
@@ -462,9 +547,15 @@ export function bankFlows(
   purchases: Invoice[],
   expenses: Expense[],
   payments: Payment[],
+  /** Optional — only so a JV-settled bill is not read as money taken at the
+   *  counter (see settledAfterBilling). JV bank lines themselves are still
+   *  never counted here, for the reason above. */
+  journalVouchers: JournalVoucher[] = [],
 ): FlowEntry[] {
   const modes: PaymentMode[] = ["bank", "upi", "cheque"];
-  const list = modes.flatMap((m) => modeFlows(m, sales, purchases, expenses, payments));
+  const list = modes.flatMap((m) =>
+    modeFlows(m, sales, purchases, expenses, payments, journalVouchers),
+  );
   list.sort((a, b) => b.date.localeCompare(a.date));
   return list;
 }
@@ -794,7 +885,13 @@ export function buildPartyStatement(
    * Splitting it costs nothing in accuracy: the bill keeps only what it took
    * on the day, each payment appears on the day it happened, and the closing
    * balance is identical either way — which the audit suite pins. */
-  const viaPayments = paidViaPayments(data.payments);
+  // Payments AND Journal Vouchers that reached a bill later each get their
+  // own dated row below; the bill keeps only what was taken on the day.
+  const viaPayments = settledAfterBilling(
+    [...data.sales, ...data.purchases],
+    data.payments,
+    data.journalVouchers ?? [],
+  );
   const directlyPaid = (inv: Invoice) =>
     Math.max(0, r2((inv.paid || 0) - (viaPayments.get(inv.id) ?? 0)));
 

@@ -56,13 +56,18 @@ function SaleReturnPage() {
     // previously these were separate calls, so a failure between them left
     // stock reversed with the return still present (or vice versa).
     const batch = newBatch();
-    for (const l of live.lineItems) {
-      if (ItemRepo.get(l.itemId)) ItemRepo.adjustFieldBatched(batch, l.itemId, "stock", -l.qty);
+    // An adjustment-only note (a pure price/tax correction) never brought any
+    // goods in when it was saved (see ReturnForm), so deleting it must not
+    // take any out — or every delete quietly shrinks the item's stock.
+    if (!live.isAdjustmentOnly) {
+      for (const l of live.lineItems) {
+        if (ItemRepo.get(l.itemId)) ItemRepo.adjustFieldBatched(batch, l.itemId, "stock", -l.qty);
+      }
     }
     SaleReturnRepo.removeBatched(batch, live.id);
     commitBatch(batch, "delete sale return");
     refresh();
-    toast.success("Sale return deleted — stock adjusted");
+    toast.success(live.isAdjustmentOnly ? "Note deleted" : "Sale return deleted — stock adjusted");
   };
 
   return (

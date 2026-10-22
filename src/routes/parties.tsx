@@ -351,6 +351,13 @@ function PartiesPage() {
       ["sale return", SaleReturnRepo.all().filter((i) => i.partyId === r.id).length],
       ["purchase return", PurchaseReturnRepo.all().filter((i) => i.partyId === r.id).length],
       ["payment", PaymentRepo.all().filter((i) => i.partyId === r.id).length],
+      // A Journal Voucher line moves this party's balance like any bill does.
+      [
+        "journal voucher",
+        JournalVoucherRepo.all().filter((jv) =>
+          jv.lines.some((l) => l.kind === "party" && l.refId === r.id),
+        ).length,
+      ],
     ];
     const blockers = counts
       .filter(([, n]) => n > 0)

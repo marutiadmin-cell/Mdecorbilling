@@ -102,13 +102,23 @@ function ItemDetailPage() {
     collect(PurchaseRepo.all(), "Purchase", "purchase", true, (l) => {
       boughtQty = r2(boughtQty + l.qty);
     });
-    collect(SaleReturnRepo.all(), "Sale Return", "sale-return", true, (l) => {
+    // This is a STOCK history: an adjustment-only note (a pure price/tax
+    // correction) moved no goods when it was saved, so it is not a row here
+    // and must not change the quantities.
+    const physical = (r: Return) => !r.isAdjustmentOnly;
+    collect(SaleReturnRepo.all().filter(physical), "Sale Return", "sale-return", true, (l) => {
       soldQty = r2(soldQty - l.qty);
       profit = r2(profit - (l.qty * l.price * (1 - l.discountPct / 100) - l.qty * costOf(l)));
     });
-    collect(PurchaseReturnRepo.all(), "Purchase Return", "purchase-return", false, (l) => {
-      boughtQty = r2(boughtQty - l.qty);
-    });
+    collect(
+      PurchaseReturnRepo.all().filter(physical),
+      "Purchase Return",
+      "purchase-return",
+      false,
+      (l) => {
+        boughtQty = r2(boughtQty - l.qty);
+      },
+    );
     for (const a of StockAdjustmentRepo.all()) {
       if (a.itemId !== id) continue;
       entries.push({

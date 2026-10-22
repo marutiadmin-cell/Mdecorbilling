@@ -14,6 +14,7 @@ import {
   allocatedAmount,
   advanceAmount,
   paidViaPayments,
+  settledAfterBilling,
   valueExTax,
   buildBankLedger,
   totalSettlementDiscount,
@@ -3931,6 +3932,240 @@ console.log(`\n═════════════════════�
       "EW35: and failing both, the transporter",
     );
   }
+}
+
+/* ═══════ TEST JA: a Journal Voucher settles a bill ONCE ══════════════════
+   A JV party line with bill-wise allocations raises the bill's `paid` (as a
+   Payment allocation does) AND moves the party by its own Dr/Cr. Before the
+   fix both were counted: a written-off bill left the customer owing MINUS
+   the bill, a legacy cash bill looked as if the JV money came in at the
+   counter, and re-saving a bank bill credited the account with it. */
+{
+  const sale = (over: Partial<Invoice>) =>
+    ({
+      partyId: "JA_P",
+      partyName: "JA Customer",
+      lineItems: [],
+      subtotal: 0,
+      discount: 0,
+      taxAmount: 0,
+      createdAt: "2026-04-01T00:00:00Z",
+      date: "2026-04-01",
+      ...over,
+    }) as Invoice;
+  const jvLine = (over: Record<string, unknown>) => ({
+    id: nid(),
+    kind: "party",
+    refId: "JA_P",
+    refName: "JA Customer",
+    debit: 0,
+    credit: 0,
+    ...over,
+  });
+  const writeOff = (id: string, amount: number, docId: string, stored = amount) =>
+    ({
+      id,
+      number: id,
+      date: "2026-04-10",
+      narration: "settle",
+      createdAt: "2026-04-10T00:00:00Z",
+      lines: [
+        jvLine({
+          credit: amount,
+          allocations: [{ docId, docKind: "sale", number: docId, amount: stored }],
+        }),
+        {
+          id: nid(),
+          kind: "expense",
+          refId: "Bad Debts",
+          refName: "Bad Debts",
+          debit: amount,
+          credit: 0,
+        },
+      ],
+    }) as never;
+  const party = [{ id: "JA_P", name: "JA Customer", openingBalance: 0 }];
+  const none = { saleReturns: [], purchaseReturns: [], payments: [] as Payment[] };
+
+  /* 1. A credit bill written off in full by JV: they owe nothing. */
+  {
+    const s1 = sale({
+      id: "JA_S1",
+      number: "JA_S1",
+      total: 1000,
+      paid: 1000,
+      paymentMode: "credit",
+    });
+    const jv = writeOff("JA_JV1", 1000, "JA_S1");
+    const data = { sales: [s1], purchases: [], ...none, journalVouchers: [jv] };
+    const [pos] = netPartyPositions(party, data);
+    assert(approx(pos.net, 0), `JA1: written-off bill leaves the party at 0, got ${pos.net}`);
+    const st = buildPartyStatement(party[0], data);
+    assert(approx(st.fullBalance, 0), `JA2: statement closes at 0, got ${st.fullBalance}`);
+    assert(approx(st.rows[st.rows.length - 1].balance, 0), "JA3: and its running balance agrees");
+  }
+
+  /* 2. A legacy cash bill: ₹600 at the counter, ₹400 settled later by JV. */
+  {
+    const s2 = sale({ id: "JA_S2", number: "JA_S2", total: 1000, paid: 1000, paymentMode: "cash" });
+    const jv = writeOff("JA_JV2", 400, "JA_S2");
+    const cash = netFlow(cashFlows([s2], [], [], [], [], [jv]));
+    assert(approx(cash, 600), `JA4: only the counter's ₹600 is cash, got ${cash}`);
+    const [pos] = netPartyPositions(party, {
+      sales: [s2],
+      purchases: [],
+      ...none,
+      journalVouchers: [jv],
+    });
+    assert(approx(pos.net, 0), `JA5: and the party owes nothing, got ${pos.net}`);
+  }
+
+  /* 3. A legacy bank bill: ₹700 into the bank at billing, ₹300 by JV. The
+        repair/save helper must say ₹700, or a re-save credits the bank ₹300
+        that never arrived. */
+  {
+    const s3 = sale({
+      id: "JA_S3",
+      number: "JA_S3",
+      total: 1000,
+      paid: 1000,
+      paymentMode: "bank",
+      bankId: "JA_B",
+      bankPaidAmount: 700,
+    });
+    const jv = writeOff("JA_JV3", 300, "JA_S3");
+    assert(
+      correctBankPaidAmount(s3, [], [jv]) === 700,
+      `JA6: bank share at billing is 700, got ${correctBankPaidAmount(s3, [], [jv])}`,
+    );
+    const plan = planBankRepair({
+      sales: [s3],
+      purchases: [],
+      payments: [],
+      banks: [{ id: "JA_B", name: "B", openingBalance: 0, balance: 700, createdAt: "" }],
+      bankTxns: [],
+      expenses: [],
+      journalVouchers: [jv],
+    });
+    assert(!plan.hasWork, "JA7: a correct book needs no bank repair");
+  }
+
+  /* 4. An old voucher that stored MORE than the bill had left: only what
+        reached `paid` counts as settling the bill; the rest is an advance. */
+  {
+    const s4 = sale({ id: "JA_S4", number: "JA_S4", total: 500, paid: 500, paymentMode: "credit" });
+    const jv = writeOff("JA_JV4", 800, "JA_S4", 800);
+    const [pos] = netPartyPositions(party, {
+      sales: [s4],
+      purchases: [],
+      ...none,
+      journalVouchers: [jv],
+    });
+    assert(approx(pos.net, -300), `JA8: the extra ₹300 is an advance, got ${pos.net}`);
+    const st = buildPartyStatement(party[0], {
+      sales: [s4],
+      purchases: [],
+      ...none,
+      journalVouchers: [jv],
+    });
+    assert(approx(st.fullBalance, -300), `JA9: statement agrees, got ${st.fullBalance}`);
+  }
+
+  /* 5. The purchase side, mirrored: a Dr party line settling a supplier bill. */
+  {
+    const pu = sale({
+      id: "JA_PU",
+      number: "JA_PU",
+      partyId: "JA_Q",
+      partyName: "JA Supplier",
+      total: 1000,
+      paid: 1000,
+      paymentMode: "credit",
+    });
+    const jv = {
+      id: "JA_JV5",
+      number: "JA_JV5",
+      date: "2026-04-11",
+      narration: "settle",
+      createdAt: "",
+      lines: [
+        {
+          id: nid(),
+          kind: "party",
+          refId: "JA_Q",
+          refName: "JA Supplier",
+          debit: 1000,
+          credit: 0,
+          allocations: [{ docId: "JA_PU", docKind: "purchase", number: "JA_PU", amount: 1000 }],
+        },
+        {
+          id: nid(),
+          kind: "ledger",
+          refId: "Discount",
+          refName: "Discount",
+          debit: 0,
+          credit: 1000,
+        },
+      ],
+    } as never;
+    const [pos] = netPartyPositions([{ id: "JA_Q", name: "JA Supplier", openingBalance: 0 }], {
+      sales: [],
+      purchases: [pu],
+      ...none,
+      journalVouchers: [jv],
+    });
+    assert(approx(pos.net, 0), `JA10: a JV-settled supplier bill leaves 0, got ${pos.net}`);
+  }
+
+  /* 6. No vouchers → exactly the old Payment-only figure. */
+  {
+    const pay = {
+      id: "JA_PAY",
+      allocations: [{ invoiceId: "X", number: "X", amount: 100, discount: 5 }],
+    } as unknown as Payment;
+    const a = settledAfterBilling([], [pay]);
+    const b = paidViaPayments([pay]);
+    assert(a.get("X") === b.get("X") && a.size === b.size, "JA11: unchanged without vouchers");
+  }
+}
+
+/* ═══════ TEST AO: an adjustment-only note moves no stock ══════════════════
+   A price/tax correction note is saved without touching stock (ReturnForm).
+   The repair used to count it anyway, so "Fix calculations" pushed stock the
+   wrong way for every such note. */
+{
+  const item = {
+    id: "AO_I",
+    name: "Sofa",
+    unit: "pcs",
+    gstRate: 0,
+    purchasePrice: 10,
+    salePrice: 20,
+    openingStock: 10,
+    stock: 10,
+    createdAt: "",
+  } as unknown as Item;
+  const line = { id: "l", itemId: "AO_I", name: "Sofa", unit: "pcs", qty: 3, price: 5 };
+  const note = { id: "n", isAdjustmentOnly: true, lineItems: [line] } as unknown as Return;
+  const real = { id: "r", lineItems: [line] } as unknown as Return;
+  const repair = (saleReturns: Return[], purchaseReturns: Return[], stock: number) =>
+    planStockRepair({
+      items: [{ ...item, stock } as Item],
+      sales: [],
+      purchases: [],
+      saleReturns,
+      purchaseReturns,
+      stockAdjustments: [],
+    });
+  assert(repair([note], [note], 10).length === 0, "AO1: adjustment-only notes are not drift");
+  assert(
+    repair([real], [], 10)[0]?.correct === 13,
+    "AO2: a physical sale return still brings goods back",
+  );
+  assert(
+    repair([], [real], 10)[0]?.correct === 7,
+    "AO3: a physical purchase return still sends goods out",
+  );
 }
 
 console.log(`  AUDIT RESULT: ${passed} assertions passed, ${failed} failed`);

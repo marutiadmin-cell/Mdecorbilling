@@ -14,12 +14,14 @@ import {
   SalesRepo,
   PurchaseRepo,
   CompanyRepo,
+  PaymentRepo,
   nextInvoiceNumber,
 } from "@/repositories";
 import type { Repository } from "@/repositories/base";
 import { newBatch, commitBatch, genId } from "@/repositories/base";
 import { useRepoData, useRepoMemo } from "@/hooks/useRepoData";
 import { useStickyState } from "@/hooks/useStickySearch";
+import { paidViaPayments } from "@/lib/ledger";
 import type {
   JournalVoucher,
   JournalLine,
@@ -66,15 +68,35 @@ const repoForDocKind = (docKind: "sale" | "purchase"): Repository<Invoice> =>
 function reverseAllocations(batch: ReturnType<typeof newBatch>, line: JournalLine) {
   for (const a of line.allocations ?? []) {
     const repo = repoForDocKind(a.docKind);
-    if (repo.get(a.docId)) repo.adjustFieldBatched(batch, a.docId, "paid", -a.amount);
+    const cur = repo.get(a.docId);
+    if (!cur) continue;
+    // Never take back more than this voucher can really have put in. A
+    // voucher saved before the APPLIED amount was stored may record more
+    // than reached `paid` (the bill had less left to settle), and undoing the
+    // full figure would leave the bill owing more than it ever did. Payments
+    // settled the rest of `paid`, so they are not this voucher's to take.
+    const viaPayments = paidViaPayments(PaymentRepo.all()).get(cur.id) ?? 0;
+    const room = Math.max(0, r2((cur.paid || 0) - viaPayments));
+    const amt = Math.min(r2(a.amount), room);
+    if (amt > 0) repo.adjustFieldBatched(batch, a.docId, "paid", -amt);
   }
 }
 
 /** Applies a line's bill-wise allocations, re-clamping against each bill's
  *  CURRENT outstanding amount at the moment of save — the same live-due
  *  safety re-check payments.tsx does, in case the bill was partly settled
- *  by something else since this dialog opened. */
-function applyAllocations(batch: ReturnType<typeof newBatch>, line: JournalLine) {
+ *  by something else since this dialog opened.
+ *
+ *  Returns what was ACTUALLY applied, and that — not the figure the dialog
+ *  asked for — is what the voucher must store. `reverseAllocations` undoes
+ *  the stored figure, and every reader that splits a bill's `paid` into
+ *  counter money vs later money (settledAfterBilling) reads it, so a stored
+ *  amount larger than what reached `paid` undid more than was ever added. */
+function applyAllocations(
+  batch: ReturnType<typeof newBatch>,
+  line: JournalLine,
+): JournalAllocation[] {
+  const applied: JournalAllocation[] = [];
   for (const a of line.allocations ?? []) {
     const repo = repoForDocKind(a.docKind);
     const cur = repo.get(a.docId);
@@ -83,7 +105,9 @@ function applyAllocations(batch: ReturnType<typeof newBatch>, line: JournalLine)
     const amt = Math.min(r2(a.amount), liveDue);
     if (amt <= 0) continue;
     repo.adjustFieldBatched(batch, a.docId, "paid", amt);
+    applied.push({ ...a, amount: amt });
   }
+  return applied;
 }
 
 /** What a journal voucher actually moved — the sum of one side (debit and
@@ -734,6 +758,24 @@ function JournalVoucherDialog({
         toast.error("Pick an account for every line — type a name and choose from the list");
         return;
       }
+      // A Credit on a party reduces what they owe — it can settle their SALE
+      // bills, never a purchase; a Debit reduces what we owe them — it can
+      // settle their PURCHASE bills, never a sale. The other way round marks
+      // a bill paid while the party's balance moves the opposite way.
+      const allocs = (l.allocations ?? []).filter((a) => a.amount > 0);
+      const wrongSide =
+        (l.credit || 0) > 0
+          ? allocs.find((a) => a.docKind !== "sale")
+          : allocs.find((a) => a.docKind !== "purchase");
+      if (wrongSide) {
+        toast.error(
+          (l.credit || 0) > 0
+            ? `"${l.refName}" is a Credit line — it can only settle their sale bills, not ${wrongSide.number}`
+            : `"${l.refName}" is a Debit line — it can only settle their purchase bills, not ${wrongSide.number}`,
+          { duration: 8000 },
+        );
+        return;
+      }
     }
     if (!balanced) {
       toast.error(
@@ -776,18 +818,23 @@ function JournalVoucherDialog({
         reverseAllocations(batch, l);
       }
     }
-    for (const l of finalLines) {
+    // Applied AFTER the old version was reversed above (the cache moves
+    // immediately), so each bill's live due is the true room left — and the
+    // voucher stores what really went in, not what was asked for.
+    const savedLines: JournalLine[] = finalLines.map((l) => {
       if (l.kind === "bank" && l.refId && BankRepo.get(l.refId)) {
         BankRepo.adjustFieldBatched(batch, l.refId, "balance", l.debit - l.credit);
       }
-      applyAllocations(batch, l);
-    }
+      if (!l.allocations) return l;
+      const applied = applyAllocations(batch, l);
+      return { ...l, allocations: applied.length ? applied : undefined };
+    });
 
     if (voucher) {
       JournalVoucherRepo.updateBatched(batch, voucher.id, {
         date,
         narration: narr,
-        lines: finalLines,
+        lines: savedLines,
       });
     } else {
       const company = CompanyRepo.get();
@@ -796,7 +843,7 @@ function JournalVoucherDialog({
         number: nextInvoiceNumber(company.journalVoucherPrefix || "JV-", JournalVoucherRepo.all()),
         date,
         narration: narr,
-        lines: finalLines,
+        lines: savedLines,
       });
     }
 

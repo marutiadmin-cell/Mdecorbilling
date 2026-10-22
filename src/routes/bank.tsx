@@ -11,6 +11,7 @@ import {
   PaymentRepo,
   BankTxnRepo,
   CashAdjustmentRepo,
+  JournalVoucherRepo,
 } from "@/repositories";
 import { useRepoData } from "@/hooks/useRepoData";
 import { newBatch, commitBatch, genId } from "@/repositories/base";
@@ -124,7 +125,13 @@ function BankPage() {
   const openingTotal = rows.reduce((s, r) => s + r.openingBalance, 0);
   // All bank/UPI/cheque activity (sales, purchases, expenses, payments) affects the real balance
   const bankActivity = netFlow(
-    bankFlows(SalesRepo.all(), PurchaseRepo.all(), ExpenseRepo.all(), PaymentRepo.all()),
+    bankFlows(
+      SalesRepo.all(),
+      PurchaseRepo.all(),
+      ExpenseRepo.all(),
+      PaymentRepo.all(),
+      JournalVoucherRepo.all(),
+    ),
   );
   const totalBalance = accountsTotal + bankActivity;
 
@@ -264,12 +271,18 @@ function BankPage() {
                there. Transfers carry no splits and are checked directly. */
             const namesThis = (doc: Parameters<typeof bankParts>[0]) =>
               (bankParts(doc).get(r.id) ?? 0) > 0;
+            // A Journal Voucher's bank line moves this account's balance
+            // too — deleting the account would drop that leg from every
+            // total while the voucher's other side stayed.
             const used =
               BankTxnRepo.all().some((t) => t.bankId === r.id) ||
               PaymentRepo.all().some(namesThis) ||
               ExpenseRepo.all().some(namesThis) ||
               SalesRepo.all().some(namesThis) ||
-              PurchaseRepo.all().some(namesThis);
+              PurchaseRepo.all().some(namesThis) ||
+              JournalVoucherRepo.all().some((jv) =>
+                jv.lines.some((l) => l.kind === "bank" && l.refId === r.id),
+              );
             if (used) {
               toast.error(
                 `Can't delete "${r.name}" — it has transactions, payments or bills linked to it. Reassign or remove those first.`,

@@ -266,7 +266,9 @@ function Dashboard() {
   const bankBalance = useMemo(
     () =>
       data.banks.reduce((a, b) => a + (b.balance ?? b.openingBalance ?? 0), 0) +
-      netFlow(bankFlows(data.sales, data.purchases, data.expenses, data.payments)),
+      netFlow(
+        bankFlows(data.sales, data.purchases, data.expenses, data.payments, data.journalVouchers),
+      ),
     [data],
   );
 

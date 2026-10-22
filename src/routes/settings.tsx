@@ -127,22 +127,34 @@ function SettingsPage() {
       return;
     setBusy(true);
     try {
-      const batch = newBatch();
+      type Op = (batch: ReturnType<typeof newBatch>) => void;
+      const ops: Op[] = [];
       for (const b of plan.bills) {
         const repo = b.kind === "sale" ? SalesRepo : PurchaseRepo;
-        repo.updateBatched(batch, b.id, { bankPaidAmount: b.correct });
+        ops.push((batch) => repo.updateBatched(batch, b.id, { bankPaidAmount: b.correct }));
       }
       for (const a of plan.accounts) {
         // Atomic increment of the shortfall, matching every other
         // bank-balance write in the app — never an absolute overwrite.
-        BankRepo.adjustFieldBatched(batch, a.id, "balance", a.delta);
+        ops.push((batch) => BankRepo.adjustFieldBatched(batch, a.id, "balance", a.delta));
       }
       for (const it of plan.items) {
         // Same rule for stock: nudge by the difference so a sale landing
         // mid-repair still counts, rather than overwriting the total.
-        ItemRepo.adjustFieldBatched(batch, it.id, "stock", it.delta);
+        ops.push((batch) => ItemRepo.adjustFieldBatched(batch, it.id, "stock", it.delta));
       }
-      if (!(await commitBatch(batch, "recalculate stored totals"))) {
+      // Firestore refuses a batch of more than 500 writes, so a large repair
+      // used to fail outright. Chunked instead — safe because every write
+      // here is either an increment by a difference or a value re-derived
+      // from the documents: if a later chunk fails, re-planning finds exactly
+      // what is still wrong and nothing is applied twice.
+      let ok = true;
+      for (let i = 0; i < ops.length && ok; i += 400) {
+        const batch = newBatch();
+        for (const op of ops.slice(i, i + 400)) op(batch);
+        ok = await commitBatch(batch, "recalculate stored totals");
+      }
+      if (!ok) {
         // The cache already holds the corrected figures, so claiming success
         // here would be the worst possible lie: the totals look repaired
         // until the rollback lands and puts the wrong ones back.
