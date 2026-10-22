@@ -1,5 +1,6 @@
 import { planBankRepair, type BankRepairData, type BankRepairPlan } from "@/lib/bankRepair";
-import type { Invoice, Item, Return, StockAdjustment } from "@/types";
+import type { Invoice, Item, Production, Return, StockAdjustment } from "@/types";
+import { productionMovements } from "@/lib/production";
 
 const r2 = (n: number) => Math.round(n * 100) / 100;
 
@@ -30,6 +31,7 @@ export interface StockCorrection {
  * rebuilds the number from first principles:
  *
  *   opening + purchases + sale returns − sales − purchase returns ± adjustments
+ *           + finished units produced − materials consumed in production
  *
  * which is the same arithmetic every write path performs incrementally.
  * Anything that disagrees is drift.
@@ -41,6 +43,9 @@ export function planStockRepair(data: {
   saleReturns: Return[];
   purchaseReturns: Return[];
   stockAdjustments: StockAdjustment[];
+  /** Optional so callers predating manufacturing still compile — but every
+   *  real caller must pass them, or the repair undoes every production run. */
+  productions?: Production[];
 }): StockCorrection[] {
   const movement = new Map<string, number>();
   const add = (itemId: string, qty: number) =>
@@ -62,6 +67,9 @@ export function planStockRepair(data: {
   }
   for (const a of data.stockAdjustments) {
     add(a.itemId, a.type === "add" ? num(a.qty) : -num(a.qty));
+  }
+  for (const p of data.productions ?? []) {
+    for (const m of productionMovements(p)) add(m.itemId, m.qty);
   }
 
   const out: StockCorrection[] = [];
@@ -91,6 +99,7 @@ export interface DataRepairData extends BankRepairData {
   saleReturns: Return[];
   purchaseReturns: Return[];
   stockAdjustments: StockAdjustment[];
+  productions: Production[];
 }
 
 /**
@@ -115,6 +124,7 @@ export function planDataRepair(data: DataRepairData): DataRepairPlan {
     saleReturns: data.saleReturns,
     purchaseReturns: data.purchaseReturns,
     stockAdjustments: data.stockAdjustments,
+    productions: data.productions,
   });
   return {
     ...bank,

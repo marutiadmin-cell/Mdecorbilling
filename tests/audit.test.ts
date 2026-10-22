@@ -36,10 +36,12 @@ import type {
   CashAdjustment,
   PaymentMode,
   BankAccount,
+  Production,
 } from "@/types";
 import { Repository } from "@/repositories/base";
 import { correctBankPaidAmount, planBankRepair } from "@/lib/bankRepair";
 import { planStockRepair } from "@/lib/dataRepair";
+import { productionMovements } from "@/lib/production";
 import {
   splitsOf,
   cashPart,
@@ -4165,6 +4167,92 @@ console.log(`\n═════════════════════�
   assert(
     repair([], [real], 10)[0]?.correct === 7,
     "AO3: a physical purchase return still sends goods out",
+  );
+}
+
+/* ═══════ TEST MF: a production run moves stock both ways ═══════════════════
+   Finished units come in, materials go out. "Fix calculations" rebuilds
+   stock from the documents, so it must count production exactly as the save
+   posted it — otherwise the first repair after a production run would put
+   the fabric back on the shelf and take the sofa away again. */
+{
+  const base = { unit: "pcs", gstRate: 0, salePrice: 0, createdAt: "" };
+  const sofa = {
+    ...base,
+    id: "MF_SOFA",
+    name: "Sofa",
+    purchasePrice: 0,
+    openingStock: 1,
+    stock: 3,
+  } as unknown as Item;
+  const fabric = {
+    ...base,
+    id: "MF_FAB",
+    name: "Fabric",
+    unit: "mtr",
+    purchasePrice: 300,
+    openingStock: 100,
+    stock: 75,
+  } as unknown as Item;
+  const foam = {
+    ...base,
+    id: "MF_FOAM",
+    name: "Foam",
+    purchasePrice: 900,
+    openingStock: 20,
+    stock: 12,
+  } as unknown as Item;
+  const run = {
+    id: "MF_P1",
+    finishedItemId: "MF_SOFA",
+    qty: 2,
+    components: [
+      { itemId: "MF_FAB", itemName: "Fabric", unit: "mtr", qty: 25, rate: 300, amount: 7500 },
+      { itemId: "MF_FOAM", itemName: "Foam", unit: "pcs", qty: 8, rate: 900, amount: 7200 },
+    ],
+  } as unknown as Production;
+  const moves = productionMovements(run);
+  assert(moves.length === 3, "MF1: one move for the finished item, one per material");
+  assert(moves[0].itemId === "MF_SOFA" && moves[0].qty === 2, "MF2: finished units come IN");
+  assert(moves[1].qty === -25 && moves[2].qty === -8, "MF3: materials go OUT, as stored");
+
+  const repair = (stocks: [number, number, number], productions: Production[]) =>
+    planStockRepair({
+      items: [
+        { ...sofa, stock: stocks[0] } as Item,
+        { ...fabric, stock: stocks[1] } as Item,
+        { ...foam, stock: stocks[2] } as Item,
+      ],
+      sales: [],
+      purchases: [],
+      saleReturns: [],
+      purchaseReturns: [],
+      stockAdjustments: [],
+      productions,
+    });
+  // 1 + 2 = 3 sofas; 100 − 25 = 75 m fabric; 20 − 8 = 12 foam.
+  assert(
+    repair([3, 75, 12], [run]).length === 0,
+    "MF4: a correct book after production is not drift",
+  );
+  const fixes = repair([3, 75, 12], []);
+  assert(
+    fixes.length === 3,
+    "MF5: (and without the run, all three would be flagged — the run really is counted)",
+  );
+  const drift = repair([9, 75, 12], [run]);
+  assert(
+    drift.length === 1 && drift[0].correct === 3,
+    "MF6: real drift on the sofa is still caught",
+  );
+  // The same material listed twice simply adds.
+  const twice = {
+    ...run,
+    components: [...run.components, { ...run.components[0], qty: 5 }],
+  } as Production;
+  assert(
+    repair([3, 70, 12], [twice]).length === 0,
+    "MF7: a material listed twice consumes both lines",
   );
 }
 

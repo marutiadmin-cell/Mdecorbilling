@@ -8,6 +8,7 @@ import {
   SaleReturnRepo,
   PurchaseReturnRepo,
   StockAdjustmentRepo,
+  ProductionRepo,
 } from "@/repositories";
 import { fmtDate, fmtDateShort, fmtMoney } from "@/lib/format";
 import { PaginationBar } from "@/components/Pagination";
@@ -131,6 +132,38 @@ function ItemDetailPage() {
         qtyOut: a.type === "reduce" ? a.qty : 0,
         rate: null,
       });
+    }
+    // A production run is the one document that can move this item BOTH
+    // ways (a sub-assembly made here and used by another BOM is still two
+    // runs), so it has its own loop rather than collect(). Each material
+    // line is its own row: the same material listed twice used that much.
+    for (const p of ProductionRepo.all()) {
+      const made = p.finishedItemId === id;
+      if (made) {
+        entries.push({
+          date: p.date,
+          created: p.createdAt,
+          type: "Produced",
+          ref: p.number,
+          party: p.partyName || "—",
+          qtyIn: p.qty,
+          qtyOut: 0,
+          rate: p.unitCost,
+        });
+      }
+      for (const c of p.components ?? []) {
+        if (c.itemId !== id) continue;
+        entries.push({
+          date: p.date,
+          created: p.createdAt,
+          type: "Consumed",
+          ref: `${p.number} — ${p.finishedItemName}`,
+          party: "—",
+          qtyIn: 0,
+          qtyOut: c.qty,
+          rate: c.rate,
+        });
+      }
     }
     entries.sort(
       (a, b) => b.date.localeCompare(a.date) || (b.created ?? "").localeCompare(a.created ?? ""),

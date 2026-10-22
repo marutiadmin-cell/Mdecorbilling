@@ -112,6 +112,118 @@ export interface Item {
   minStock?: number;
   openingStock: number;
   description?: string;
+  /** What the item is to the business — see ItemKind. Absent means
+   *  "trading", which is what every item was before manufacturing existed. */
+  kind?: ItemKind;
+  /** Cost per unit of `openingStock`. `purchasePrice` cannot serve: every
+   *  purchase overwrites it, so valuing opening stock with it would quietly
+   *  restate every earlier balance sheet. Absent → valuation falls back to
+   *  the first known purchase/production rate. */
+  openingRate?: number;
+  createdAt: string;
+}
+
+/**
+ * Where an item sits in the business:
+ *  - "raw" — bought to be used up making something (fabric, foam, wood,
+ *    springs, curtain tape)
+ *  - "finished" — made here from a Bill of Materials (a sofa, a mattress, a
+ *    stitched curtain)
+ *  - "trading" — bought and sold as it is
+ * It decides which pickers offer the item and which inventory heading it is
+ * reported under on the balance sheet (raw materials / finished goods /
+ * stock-in-trade). It never blocks anything: a raw material can still be
+ * sold, a finished good still bought.
+ */
+export type ItemKind = "trading" | "raw" | "finished";
+
+/** One named cost that is not a material — karigar labour, stitching,
+ *  polishing, transport to the workshop, a share of electricity. */
+export interface CostLine {
+  label: string;
+  amount: number;
+}
+
+/** One material a BOM uses, per `Bom.outputQty` finished units. */
+export interface BomComponent {
+  itemId: ID;
+  /** Snapshot for display — the item can be renamed. */
+  itemName: string;
+  unit: string;
+  qty: number;
+  /** Extra consumed beyond `qty` for cutting/stitching loss, as a percent. */
+  wastagePct?: number;
+}
+
+/**
+ * A Bill of Materials — the recipe for one finished item: which materials,
+ * how much of each, and what labour/overhead it takes, for `outputQty`
+ * finished units (usually 1). A finished item can have several (the same
+ * sofa in two fabrics). Recording it moves nothing; a Production does.
+ */
+export interface Bom {
+  id: ID;
+  name: string;
+  finishedItemId: ID;
+  finishedItemName: string;
+  /** The recipe below makes this many finished units. */
+  outputQty: number;
+  components: BomComponent[];
+  /** Labour and overhead for `outputQty` units. */
+  additionalCosts: CostLine[];
+  notes?: string;
+  /** Hidden from new productions; kept so old productions still name it. */
+  archived?: boolean;
+  createdAt: string;
+}
+
+/** One material a production actually used — the TOTAL for the run, not
+ *  per unit, so every stock reader rebuilds exactly the figure that was
+ *  posted (stock moves are rounded to 2 decimals). */
+export interface ProductionLine {
+  itemId: ID;
+  itemName: string;
+  unit: string;
+  qty: number;
+  /** Cost per unit at the time (the material's purchase price then). */
+  rate: number;
+  amount: number;
+}
+
+/**
+ * A production run (Tally calls it a Manufacturing Journal): materials go
+ * out of stock, finished units come in, and the finished item's cost becomes
+ * what this run cost per unit. Like a purchase, it moves stock and cost, never
+ * money — wages are still paid through Expenses.
+ */
+export interface Production {
+  id: ID;
+  /** Its own series (Company.productionPrefix, default "MFG-"). */
+  number: string;
+  date: string;
+  bomId?: ID;
+  bomName?: string;
+  finishedItemId: ID;
+  finishedItemName: string;
+  unit: string;
+  /** Finished units made. */
+  qty: number;
+  components: ProductionLine[];
+  additionalCosts: CostLine[];
+  materialCost: number;
+  additionalCost: number;
+  totalCost: number;
+  unitCost: number;
+  /** Made to a customer's order — who it is for, and their order/quotation
+   *  reference. A label only: it posts nothing to the party. */
+  partyId?: ID;
+  partyName?: string;
+  orderRef?: string;
+  notes?: string;
+  /** The finished item's purchasePrice just before this run replaced it —
+   *  put back on delete, but only while this run is still the item's latest
+   *  production and nothing has changed the price since. */
+  prevFinishedCost?: number;
   createdAt: string;
 }
 
@@ -563,6 +675,8 @@ export interface Company {
   quotationPrefix?: string;
   proformaPrefix?: string;
   journalVoucherPrefix?: string;
+  /** Own series for production runs — default "MFG-". */
+  productionPrefix?: string;
   enableGst?: boolean;
   /**
    * What kind of billing this business actually does — sets the DEFAULT
@@ -619,12 +733,7 @@ export interface Company {
  * Daybook/GST aggregate reads across the other modules, already protected
  * by their own rules) — it only gates the aggregated-view pages themselves. */
 export type ModuleKey =
-  | "masterData"
-  | "sales"
-  | "purchaseExpenses"
-  | "cashBank"
-  | "reports"
-  | "documents";
+  "masterData" | "sales" | "purchaseExpenses" | "cashBank" | "reports" | "documents";
 
 export interface ModulePermission {
   view: boolean;

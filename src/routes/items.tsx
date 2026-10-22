@@ -8,6 +8,8 @@ import { useAutoFocusOnDesktop } from "@/hooks/use-mobile";
 import {
   ItemRepo,
   StockAdjustmentRepo,
+  BomRepo,
+  ProductionRepo,
   SalesRepo,
   PurchaseRepo,
   SaleReturnRepo,
@@ -151,10 +153,18 @@ function ItemsPage() {
       PurchaseRepo.all().some((i) => i.lineItems.some((l) => l.itemId === r.id)) ||
       SaleReturnRepo.all().some((i) => i.lineItems.some((l) => l.itemId === r.id)) ||
       PurchaseReturnRepo.all().some((i) => i.lineItems.some((l) => l.itemId === r.id)) ||
-      StockAdjustmentRepo.all().some((a) => a.itemId === r.id);
+      StockAdjustmentRepo.all().some((a) => a.itemId === r.id) ||
+      // A production run moved its stock; a BOM would offer a material that
+      // no longer exists the next time it is used.
+      ProductionRepo.all().some(
+        (p) => p.finishedItemId === r.id || p.components.some((c) => c.itemId === r.id),
+      ) ||
+      BomRepo.all().some(
+        (b) => b.finishedItemId === r.id || b.components.some((c) => c.itemId === r.id),
+      );
     if (onDoc) {
       toast.error(
-        `Can't delete "${r.name}" — it's used on bills, returns or stock adjustments. Deleting it would break stock and profit reports for those records.`,
+        `Can't delete "${r.name}" — it's used on bills, returns, stock adjustments, a BOM or a production run. Deleting it would break stock and profit reports for those records.`,
       );
       return;
     }

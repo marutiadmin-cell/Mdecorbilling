@@ -61,6 +61,8 @@ Screens (routes/components)                               │   then fire-and-fo
 | `payees`                                 | auto-created from expenses                             | —                                                                    |
 | `banks` / `bankTxns`                     | Bank screen                                            | `bankId`                                                             |
 | `stock-adjustments` / `cash-adjustments` | Items / Cash / Bank screens                            | `itemId` / —                                                         |
+| `boms`                                   | Manufacturing → BOM (recipes; move nothing)            | `finishedItemId`, `components[].itemId`                              |
+| `productions`                            | Manufacturing → Production; **±stock**                 | `finishedItemId`, `components[].itemId`, optional `partyId`          |
 | `teamUsers`                              | Owner (Settings → Team)                                | Firebase Auth UID                                                    |
 | `settings/company`                       | Owner (Settings)                                       | —                                                                    |
 
@@ -120,6 +122,10 @@ PURCHASE RETURN stock −qty   ·  party payable   −         (debit note)
 PAYMENT IN      party receivable −  ·  cash/bank +
 PAYMENT OUT     party payable   −  ·  cash/bank −
 EXPENSE         cash/bank −
+PRODUCTION      finished item stock +qty (cost = this run per unit)  ·  each material stock −qty
+                (moves no money — wages are paid through Expenses)
+JOURNAL VOUCHER a bill-wise line settles the bill once: through its `paid`, not again
+                through the party line (see settledAfterBilling in lib/ledger.ts)
 ```
 
 Every one of these is written atomically, reversed correctly on edit/delete, and re-derived into the dashboards/reports — never stored as a running total.

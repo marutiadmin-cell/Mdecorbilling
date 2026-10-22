@@ -14,6 +14,7 @@ import {
   SaleReturnRepo,
   PurchaseReturnRepo,
   StockAdjustmentRepo,
+  ProductionRepo,
   JournalVoucherRepo,
 } from "@/repositories";
 import { newBatch, commitBatch } from "@/repositories/base";
@@ -82,6 +83,7 @@ function SettingsPage() {
     saleReturns: SaleReturnRepo.all(),
     purchaseReturns: PurchaseReturnRepo.all(),
     stockAdjustments: StockAdjustmentRepo.all(),
+    productions: ProductionRepo.all(),
     journalVouchers: JournalVoucherRepo.all(),
   });
 

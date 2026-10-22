@@ -21,6 +21,8 @@ import type {
   BusinessDoc,
   Estimate,
   JournalVoucher,
+  Bom,
+  Production,
 } from "@/types";
 
 export const PartyRepo = new Repository<Party>("parties");
@@ -45,6 +47,11 @@ export const CashAdjustmentRepo = new Repository<CashAdjustment>("cash-adjustmen
    JournalVoucher in src/types/index.ts for why this exists and what it
    deliberately does not do. */
 export const JournalVoucherRepo = new Repository<JournalVoucher>("journal-vouchers");
+/* Manufacturing — a BOM is the recipe for a finished item (moves nothing);
+   a production run uses materials up and brings finished units in. See
+   src/lib/production.ts. */
+export const BomRepo = new Repository<Bom>("boms");
+export const ProductionRepo = new Repository<Production>("productions");
 
 const defaultCompany: Company = {
   name: "My Company",
@@ -304,6 +311,8 @@ export const REPO_BY_KEY: Record<string, Repository<{ id: string }>> = {
   "bz.estimates": EstimateRepo as Repository<{ id: string }>,
   "bz.cash-adjustments": CashAdjustmentRepo as Repository<{ id: string }>,
   "bz.journal-vouchers": JournalVoucherRepo as Repository<{ id: string }>,
+  "bz.boms": BomRepo as Repository<{ id: string }>,
+  "bz.productions": ProductionRepo as Repository<{ id: string }>,
 };
 
 const ALL_REPOS = Object.values(REPO_BY_KEY);
@@ -314,7 +323,11 @@ const ALL_REPOS = Object.values(REPO_BY_KEY);
  * its own; it only aggregates reads across the others, already covered by
  * their own module here). */
 const MODULE_REPOS: Record<ModuleKey, Repository<{ id: string }>[]> = {
-  masterData: [PartyRepo, ItemRepo, StockAdjustmentRepo] as Repository<{ id: string }>[],
+  // Manufacturing lives under Master Data: a production run is a stock
+  // movement, made by the same people who keep items and stock right.
+  masterData: [PartyRepo, ItemRepo, StockAdjustmentRepo, BomRepo, ProductionRepo] as Repository<{
+    id: string;
+  }>[],
   documents: [BusinessDocRepo] as Repository<{ id: string }>[],
   sales: [SalesRepo, SaleReturnRepo, EstimateRepo] as Repository<{ id: string }>[],
   purchaseExpenses: [PurchaseRepo, PurchaseReturnRepo, ExpenseRepo, PayeeRepo] as Repository<{

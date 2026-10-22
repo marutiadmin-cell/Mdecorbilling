@@ -12,11 +12,13 @@ import {
   SaleReturnRepo,
   PurchaseReturnRepo,
   StockAdjustmentRepo,
+  ProductionRepo,
 } from "@/repositories";
 import { useRepoData } from "@/hooks/useRepoData";
 import { useStickyState } from "@/hooks/useStickySearch";
 import type { Item } from "@/types";
 import { fmtMoney } from "@/lib/format";
+import { productionMovements } from "@/lib/production";
 import { Boxes, Package, Search } from "lucide-react";
 
 export const Route = createFileRoute("/inventory")({ component: InventoryPage });
@@ -67,6 +69,13 @@ function InventoryPage() {
     const map = a.type === "add" ? purchaseQty : salesQty;
     map.set(a.itemId, (map.get(a.itemId) ?? 0) + a.qty);
   });
+  // Production: finished units are Stock In, materials used are Stock Out.
+  ProductionRepo.all().forEach((p) =>
+    productionMovements(p).forEach((m) => {
+      const map = m.qty >= 0 ? purchaseQty : salesQty;
+      map.set(m.itemId, (map.get(m.itemId) ?? 0) + Math.abs(m.qty));
+    }),
+  );
 
   const columns: Column<Item>[] = [
     {
@@ -93,14 +102,16 @@ function InventoryPage() {
       label: "Stock In",
       align: "right",
       width: "90px",
-      render: (r) => `+${purchaseQty.get(r.id) ?? 0}`,
+      // Rounded: fabric/foam quantities are decimals, and their sums carry
+      // float dust (12.499999…) that would otherwise be printed.
+      render: (r) => `+${Math.round((purchaseQty.get(r.id) ?? 0) * 100) / 100}`,
     },
     {
       key: "out",
       label: "Stock Out",
       align: "right",
       width: "90px",
-      render: (r) => `-${salesQty.get(r.id) ?? 0}`,
+      render: (r) => `-${Math.round((salesQty.get(r.id) ?? 0) * 100) / 100}`,
     },
     {
       key: "stock",
