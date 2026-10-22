@@ -20,7 +20,9 @@ import { useRepoData, useRepoMemo } from "@/hooks/useRepoData";
 import { useStickyState } from "@/hooks/useStickySearch";
 import { BulkUpdateItemsDialog } from "@/components/BulkUpdateItemsDialog";
 import { newBatch, commitBatch } from "@/repositories/base";
-import type { Item } from "@/types";
+import type { Item, ItemKind } from "@/types";
+import { SelectMenu } from "@/components/SelectMenu";
+import { ITEM_KIND_OPTIONS } from "@/lib/production";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Field } from "@/components/Field";
@@ -179,7 +181,16 @@ function ItemsPage() {
     {
       key: "name",
       label: "Name",
-      render: (r) => <span className="font-medium">{r.name}</span>,
+      render: (r) => (
+        <span className="inline-flex items-center gap-1.5">
+          <span className="font-medium">{r.name}</span>
+          {(r.kind === "raw" || r.kind === "finished") && (
+            <span className="text-[9.5px] uppercase tracking-wide text-muted-foreground border rounded px-1">
+              {r.kind === "raw" ? "Raw" : "Finished"}
+            </span>
+          )}
+        </span>
+      ),
       sortValue: (r) => r.name,
     },
     { key: "category", label: "Category", width: "140px", render: (r) => r.category ?? "—" },
@@ -760,6 +771,19 @@ export function ItemDialog({
               ariaLabel="Unit"
               placeholder="e.g. PCS, KGS…"
               className="h-8 px-2 border rounded bg-background outline-none focus:border-primary focus:ring-1 focus:ring-primary"
+            />
+          </label>
+          {/* Written explicitly even as "trading": an edit merges its patch
+              into the stored item, so leaving the field out could never take
+              an item back from "raw" to trading. */}
+          <label className="flex flex-col gap-1 text-[12px]">
+            <span className="text-muted-foreground font-medium">Item type</span>
+            <SelectMenu<ItemKind>
+              value={f.kind ?? "trading"}
+              options={ITEM_KIND_OPTIONS}
+              onChange={(v) => setF({ ...f, kind: v })}
+              ariaLabel="Item type"
+              className="w-full h-8 px-2 justify-between text-[13px]"
             />
           </label>
           <Field

@@ -42,7 +42,7 @@ interface HistoryRow {
   qtyOut: number;
   rate: number | null;
   docId?: string;
-  docKind?: "sale" | "purchase" | "sale-return" | "purchase-return";
+  docKind?: "sale" | "purchase" | "sale-return" | "purchase-return" | "production";
 }
 
 function ItemDetailPage() {
@@ -149,6 +149,8 @@ function ItemDetailPage() {
           qtyIn: p.qty,
           qtyOut: 0,
           rate: p.unitCost,
+          docId: p.id,
+          docKind: "production",
         });
       }
       for (const c of p.components ?? []) {
@@ -162,6 +164,8 @@ function ItemDetailPage() {
           qtyIn: 0,
           qtyOut: c.qty,
           rate: c.rate,
+          docId: p.id,
+          docKind: "production",
         });
       }
     }
@@ -175,7 +179,8 @@ function ItemDetailPage() {
 
   const openRow = (e: HistoryRow) => {
     if (!e.docId || !e.docKind) return;
-    if (e.docKind === "sale") navigate({ to: "/sales/$id", params: { id: e.docId } });
+    if (e.docKind === "production") navigate({ to: "/productions", search: { open: e.docId } });
+    else if (e.docKind === "sale") navigate({ to: "/sales/$id", params: { id: e.docId } });
     else if (e.docKind === "purchase") navigate({ to: "/purchase/$id", params: { id: e.docId } });
     else if (e.docKind === "sale-return")
       navigate({ to: "/sale-return/$id", params: { id: e.docId } });

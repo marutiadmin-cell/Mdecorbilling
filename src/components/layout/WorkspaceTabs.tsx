@@ -22,6 +22,8 @@ import {
   FileText,
   Settings,
   ScrollText,
+  ClipboardList,
+  Factory,
   type LucideIcon,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
@@ -175,6 +177,8 @@ function titleFromPath(path: string): string | null {
     "/payments": "Payments",
     "/journal-vouchers": "Journal Vouchers",
     "/inventory": "Inventory",
+    "/boms": "Bill of Materials",
+    "/productions": "Production",
     "/bank": "Bank",
     "/cash": "Cash",
     "/reports": "Reports",
@@ -195,6 +199,8 @@ const ICON_BY_SEGMENT: Record<string, LucideIcon> = {
   items: Package,
   documents: FolderOpen,
   inventory: Boxes,
+  boms: ClipboardList,
+  productions: Factory,
   sales: ShoppingCart,
   quotations: FileSignature,
   proforma: FileSignature,

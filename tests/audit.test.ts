@@ -37,11 +37,22 @@ import type {
   PaymentMode,
   BankAccount,
   Production,
+  Bom,
 } from "@/types";
 import { Repository } from "@/repositories/base";
 import { correctBankPaidAmount, planBankRepair } from "@/lib/bankRepair";
 import { planStockRepair } from "@/lib/dataRepair";
-import { productionMovements } from "@/lib/production";
+import {
+  productionMovements,
+  consumptionFor,
+  scaledCosts,
+  productionTotals,
+  bomUnitCost,
+  bomCycle,
+  stockShortfalls as productionShortfalls,
+  costToRestore,
+  absorbedConversionCost,
+} from "@/lib/production";
 import {
   splitsOf,
   cashPart,
@@ -4254,6 +4265,164 @@ console.log(`\n═════════════════════�
     repair([3, 70, 12], [twice]).length === 0,
     "MF7: a material listed twice consumes both lines",
   );
+}
+
+/* ═══════ TEST MC: what a production run costs ════════════════════════════
+   Tally's rule: material = BOM qty × units made ÷ BOM output, plus wastage,
+   at the material's cost; labour/overhead scale the same way; the finished
+   item's cost per unit is the run's total ÷ units made. Hand-worked:
+   a BOM making 2 sofas from 25 m fabric (10% wastage, ₹300/m), 8 foam
+   sheets (₹900, sheets are PCS) and ₹4,000 labour. Making 3 sofas:
+     fabric 25 × 3/2 × 1.10 = 41.25 m × 300 = 12,375
+     foam    8 × 3/2        = 12 pcs   × 900 = 10,800
+     labour  4,000 × 3/2                     =  6,000
+     total 29,175 → 9,725 per sofa. */
+{
+  const items = new Map([
+    ["MC_FAB", { name: "Fabric", unit: "MTR", purchasePrice: 300, stock: 50 }],
+    ["MC_FOAM", { name: "Foam", unit: "PCS", purchasePrice: 900, stock: 5 }],
+    ["MC_SOFA", { name: "Sofa", unit: "PCS", purchasePrice: 0, stock: 0 }],
+  ]);
+  const bom = {
+    id: "MC_B",
+    finishedItemId: "MC_SOFA",
+    outputQty: 2,
+    components: [
+      { itemId: "MC_FAB", itemName: "Fabric", unit: "MTR", qty: 25, wastagePct: 10 },
+      { itemId: "MC_FOAM", itemName: "Foam", unit: "PCS", qty: 8 },
+    ],
+    additionalCosts: [{ label: "Karigar labour", amount: 4000 }],
+  } as unknown as Bom;
+
+  const lines = consumptionFor(bom, 3, items);
+  assert(
+    lines[0].qty === 41.25 && lines[0].amount === 12375,
+    `MC1: fabric 41.25 m = 12,375, got ${lines[0].qty} = ${lines[0].amount}`,
+  );
+  assert(lines[1].qty === 12 && lines[1].amount === 10800, "MC2: foam 12 sheets = 10,800");
+  const costs = scaledCosts(bom, 3);
+  assert(costs.length === 1 && costs[0].amount === 6000, "MC3: labour scales to 6,000");
+  const t = productionTotals(lines, costs, 3);
+  assert(
+    t.materialCost === 23175 && t.additionalCost === 6000,
+    "MC4: material 23,175 + labour 6,000",
+  );
+  assert(
+    t.totalCost === 29175 && t.unitCost === 9725,
+    `MC5: 29,175 total, 9,725 a sofa, got ${t.unitCost}`,
+  );
+  assert(bomUnitCost(bom, items) === 9725, "MC6: the BOM's own estimate agrees");
+
+  // Whole units round UP only when asked: 1 sofa needs 4 sheets exactly, so
+  // try a BOM needing 2.5 sheets a sofa.
+  const half = {
+    ...bom,
+    outputQty: 1,
+    components: [{ itemId: "MC_FOAM", itemName: "Foam", unit: "PCS", qty: 2.5 }],
+  } as Bom;
+  assert(consumptionFor(half, 1, items)[0].qty === 2.5, "MC7: decimals kept by default");
+  assert(consumptionFor(half, 1, items, true)[0].qty === 3, "MC8: whole units round up on request");
+  const fabricOnly = {
+    ...bom,
+    outputQty: 1,
+    components: [{ itemId: "MC_FAB", itemName: "Fabric", unit: "MTR", qty: 2.5 }],
+  } as Bom;
+  assert(
+    consumptionFor(fabricOnly, 1, items, true)[0].qty === 2.5,
+    "MC9: metres are never rounded up",
+  );
+
+  // Stock check: 41.25 m of 50 is fine; 12 sheets of 5 is short by 7.
+  const moves = productionMovements({ finishedItemId: "MC_SOFA", qty: 3, components: lines });
+  const short = productionShortfalls(moves, [], items as never);
+  assert(
+    short.length === 1 && /Foam/.test(short[0]),
+    `MC10: only the foam is short, got ${short.join(" | ")}`,
+  );
+  // An edit that takes back an older run first counts that as available.
+  const old = productionMovements({
+    finishedItemId: "MC_SOFA",
+    qty: 2,
+    components: [{ ...lines[1], qty: 8 }],
+  });
+  assert(
+    productionShortfalls(moves, old, items as never).length === 0,
+    "MC11: undoing the old run frees its 8 sheets (5+8 ≥ 12)",
+  );
+
+  // Cycles: a sofa cannot be its own material, nor need itself round a loop.
+  const name = (id: string) => id;
+  assert(
+    !!bomCycle({ id: "x", finishedItemId: "A", components: [{ itemId: "A" } as never] }, [], name),
+    "MC12: self-reference refused",
+  );
+  const cushion = {
+    id: "B1",
+    finishedItemId: "CUSHION",
+    components: [{ itemId: "SOFA" } as never],
+  };
+  assert(
+    !!bomCycle(
+      { id: "B2", finishedItemId: "SOFA", components: [{ itemId: "CUSHION" } as never] },
+      [cushion],
+      name,
+    ),
+    "MC13: a two-BOM loop refused",
+  );
+  const fine = { id: "B1", finishedItemId: "CUSHION", components: [{ itemId: "FOAM" } as never] };
+  assert(
+    bomCycle(
+      { id: "B2", finishedItemId: "SOFA", components: [{ itemId: "CUSHION" } as never] },
+      [fine],
+      name,
+    ) === null,
+    "MC14: a sub-assembly (cushion in a sofa) is allowed",
+  );
+  assert(
+    bomCycle(
+      { id: "B2", finishedItemId: "SOFA", components: [{ itemId: "CUSHION" } as never] },
+      [{ ...cushion, archived: true }],
+      name,
+    ) === null,
+    "MC15: an archived recipe is not a loop",
+  );
+
+  // Restoring the finished item's cost on delete: only for the latest run,
+  // and only while its price is still what the run set.
+  const run = (id: string, date: string, unitCost: number, prev: number) =>
+    ({
+      id,
+      date,
+      createdAt: date,
+      finishedItemId: "MC_SOFA",
+      unitCost,
+      prevFinishedCost: prev,
+    }) as unknown as Production;
+  const r1 = run("R1", "2026-05-01", 9000, 8000);
+  const r2run = run("R2", "2026-06-01", 9725, 9000);
+  assert(
+    costToRestore(r2run, { purchasePrice: 9725 }, [r1, r2run]) === 9000,
+    "MC16: latest run, untouched price → earlier cost back",
+  );
+  assert(
+    costToRestore(r1, { purchasePrice: 9725 }, [r1, r2run]) === undefined,
+    "MC17: an older run never resets the price",
+  );
+  assert(
+    costToRestore(r2run, { purchasePrice: 9900 }, [r1, r2run]) === undefined,
+    "MC18: a price changed since (a purchase) is kept",
+  );
+
+  // The quick P&L give-back: only runs inside the period.
+  const absorbed = absorbedConversionCost(
+    [
+      { date: "2026-04-15", additionalCost: 6000 },
+      { date: "2026-03-31", additionalCost: 999 },
+    ],
+    "2026-04-01",
+    "2027-03-31",
+  );
+  assert(absorbed === 6000, "MC19: labour moved into stock counts once, inside the period");
 }
 
 console.log(`  AUDIT RESULT: ${passed} assertions passed, ${failed} failed`);

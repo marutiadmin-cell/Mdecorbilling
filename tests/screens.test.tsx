@@ -56,6 +56,8 @@ import {
   nextInvoiceNumber,
   PurchaseReturnRepo,
   CashAdjustmentRepo,
+  BomRepo,
+  ProductionRepo,
 } from "@/repositories";
 
 export interface Results {
@@ -580,6 +582,8 @@ async function runAll(): Promise<Results> {
       "/settings",
       "/sale-return",
       "/purchase-return",
+      "/boms",
+      "/productions",
     ];
 
     for (const route of PHONE_ROUTES) {
@@ -991,6 +995,8 @@ async function runAll(): Promise<Results> {
     ["/parties", "Ramesh Traders"],
     ["/items", "USB Cable"],
     ["/inventory", "USB Cable"],
+    ["/boms", "Bill of Materials"],
+    ["/productions", "Production"],
     ["/sales", "INV-0001"],
     ["/purchase", "PUR-0001"],
     ["/sale-return", "CR-0001"],
@@ -5947,6 +5953,158 @@ async function runAll(): Promise<Results> {
 
   bulkRoot.unmount();
   bulkHost.remove();
+
+  /* ── Manufacturing: a recipe, and a production run saved for real ─────
+     Through the actual dialog: pick the BOM, type how many were made, save.
+     Then the stock of all three items and the sofa's cost must be exactly
+     what the run posted — and "Fix calculations" must find nothing to undo. */
+  {
+    const base = { gstRate: 0, createdAt: "2026-01-01T00:00:00Z" };
+    ItemRepo.add({
+      ...base,
+      id: "MF-FAB",
+      name: "Velvet Fabric",
+      kind: "raw",
+      unit: "MTR",
+      purchasePrice: 300,
+      salePrice: 0,
+      stock: 100,
+      openingStock: 100,
+    } as never);
+    ItemRepo.add({
+      ...base,
+      id: "MF-FOAM",
+      name: "Foam Sheet 40D",
+      kind: "raw",
+      unit: "PCS",
+      purchasePrice: 900,
+      salePrice: 0,
+      stock: 20,
+      openingStock: 20,
+    } as never);
+    ItemRepo.add({
+      ...base,
+      id: "MF-SOFA",
+      name: "Royal 3 Seater Sofa",
+      kind: "finished",
+      unit: "PCS",
+      purchasePrice: 0,
+      salePrice: 30000,
+      stock: 0,
+      openingStock: 0,
+    } as never);
+    BomRepo.add({
+      id: "MF-BOM",
+      name: "Royal 3 Seater — velvet",
+      finishedItemId: "MF-SOFA",
+      finishedItemName: "Royal 3 Seater Sofa",
+      outputQty: 1,
+      components: [
+        { itemId: "MF-FAB", itemName: "Velvet Fabric", unit: "MTR", qty: 12 },
+        { itemId: "MF-FOAM", itemName: "Foam Sheet 40D", unit: "PCS", qty: 4 },
+      ],
+      additionalCosts: [{ label: "Karigar labour", amount: 3000 }],
+    } as never);
+
+    // 12 m × 300 + 4 × 900 + 3,000 labour = 10,200 a sofa.
+    const bomPage = await renderRoute("/boms");
+    {
+      const row = Array.from(document.querySelectorAll("tr")).find((r) =>
+        (r.textContent ?? "").includes("Royal 3 Seater — velvet"),
+      );
+      await act(async () => {
+        row?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      });
+      await settleMs(200);
+      has(
+        currentDialog().textContent ?? "",
+        "Edit BOM",
+        "boms: a row opens its recipe for editing",
+      );
+      await act(async () => {
+        document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+      });
+      await settleMs(200);
+    }
+    has(bomPage, "Royal 3 Seater — velvet", "boms: the recipe is listed");
+    has(bomPage, fmtMoney(10200), "boms: cost per sofa 10,200");
+
+    await renderRoute("/productions");
+    await act(async () => {
+      findButton(/New production/)?.click();
+    });
+    await settleMs(200);
+    const dlg = currentDialog();
+    const bomBox = dlg.querySelector(
+      '[role="combobox"][aria-label="BOM"]',
+    ) as HTMLButtonElement | null;
+    assert(!!bomBox, "production: the BOM chooser is in the dialog");
+    await act(async () => {
+      bomBox?.click();
+    });
+    await settleMs(120);
+    const opt = Array.from(document.querySelectorAll('[role="option"]')).find((o) =>
+      (o.textContent ?? "").includes("Royal 3 Seater — velvet"),
+    ) as HTMLElement | undefined;
+    assert(!!opt, "production: the BOM is offered");
+    await act(async () => {
+      opt?.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+    });
+    await settleMs(120);
+    const qtyBox = currentDialog().querySelector(
+      'input[aria-label="Quantity made"]',
+    ) as HTMLInputElement | null;
+    await act(async () => {
+      setInput(qtyBox, "2");
+    });
+    await settleMs(120);
+    const dlgText = currentDialog().textContent ?? "";
+    has(dlgText, fmtMoney(20400), "production: 2 sofas cost 20,400 before saving");
+    await act(async () => {
+      findButton(/^Save production$/)?.click();
+    });
+    await settleMs(300);
+
+    const runs = ProductionRepo.all().filter((p) => p.finishedItemId === "MF-SOFA");
+    assert(runs.length === 1, `production: one run saved, got ${runs.length}`);
+    assert(runs[0]?.number === "MFG-0001", `production: numbered MFG-0001, got ${runs[0]?.number}`);
+    assert(
+      ItemRepo.get("MF-SOFA")?.stock === 2,
+      `production: +2 sofas, got ${ItemRepo.get("MF-SOFA")?.stock}`,
+    );
+    assert(
+      ItemRepo.get("MF-FAB")?.stock === 76,
+      `production: 100 − 24 m fabric = 76, got ${ItemRepo.get("MF-FAB")?.stock}`,
+    );
+    assert(
+      ItemRepo.get("MF-FOAM")?.stock === 12,
+      `production: 20 − 8 sheets = 12, got ${ItemRepo.get("MF-FOAM")?.stock}`,
+    );
+    assert(
+      ItemRepo.get("MF-SOFA")?.purchasePrice === 10200,
+      `production: the sofa now costs 10,200 each, got ${ItemRepo.get("MF-SOFA")?.purchasePrice}`,
+    );
+    const drift = planStockRepair({
+      items: ItemRepo.all().filter((i) => i.id.startsWith("MF-")),
+      sales: [],
+      purchases: [],
+      saleReturns: [],
+      purchaseReturns: [],
+      stockAdjustments: [],
+      productions: ProductionRepo.all(),
+    });
+    assert(
+      drift.length === 0,
+      `production: Fix calculations finds nothing to undo, got ${drift.map((d) => d.name).join(", ")}`,
+    );
+
+    const list = await renderRoute("/productions");
+    has(list, "MFG-0001", "production: listed in the register");
+    const sofaHistory = await renderRoute("/items/MF-SOFA");
+    has(sofaHistory, "Produced", "production: the sofa's history shows it was made");
+    const fabricHistory = await renderRoute("/items/MF-FAB");
+    has(fabricHistory, "Consumed", "production: the fabric's history shows it was used");
+  }
 
   if (root) root.unmount();
   if (host) host.remove();

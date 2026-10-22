@@ -26,6 +26,8 @@ import {
   LogOut,
   UserSquare2,
   ScrollText,
+  ClipboardList,
+  Factory,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useWorkspace } from "@/store/workspace";
@@ -62,6 +64,16 @@ const groups: NavGroup[] = [
       { path: "/parties", label: "Parties", icon: Users, key: "2" },
       { path: "/items", label: "Items", icon: Package, key: "3" },
       { path: "/inventory", label: "Inventory", icon: Boxes },
+    ],
+  },
+  // Making sofas, curtains and mattresses: the recipe (BOM) and each
+  // production run. Under the Master Data permission — it moves stock.
+  {
+    title: "Manufacturing",
+    module: "masterData",
+    items: [
+      { path: "/boms", label: "Bill of Materials", icon: ClipboardList },
+      { path: "/productions", label: "Production", icon: Factory },
     ],
   },
   // Documents vault hidden for M Décor — uncomment (and the FolderOpen

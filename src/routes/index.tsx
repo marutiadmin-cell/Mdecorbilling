@@ -12,6 +12,7 @@ import {
   PurchaseReturnRepo,
   CashAdjustmentRepo,
   JournalVoucherRepo,
+  ProductionRepo,
 } from "@/repositories";
 import { useRepoData } from "@/hooks/useRepoData";
 import type {
@@ -24,6 +25,7 @@ import type {
   Payment,
   CashAdjustment,
   JournalVoucher,
+  Production,
 } from "@/types";
 import { fmtMoney, ymd, today } from "@/lib/format";
 import { useFinancialYear } from "@/store/financialYear";
@@ -38,6 +40,7 @@ import {
   returnValueExTax,
   totalSettlementDiscount,
 } from "@/lib/ledger";
+import { absorbedConversionCost } from "@/lib/production";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
   AreaChart,
@@ -143,6 +146,7 @@ function Dashboard() {
     purchaseReturns: Return[];
     cashAdjustments: CashAdjustment[];
     journalVouchers: JournalVoucher[];
+    productions: Production[];
   }>({
     sales: [],
     purchases: [],
@@ -155,6 +159,7 @@ function Dashboard() {
     purchaseReturns: [],
     cashAdjustments: [],
     journalVouchers: [],
+    productions: [],
   });
 
   useEffect(() => {
@@ -170,6 +175,7 @@ function Dashboard() {
       purchaseReturns: PurchaseReturnRepo.all(),
       cashAdjustments: CashAdjustmentRepo.all(),
       journalVouchers: JournalVoucherRepo.all(),
+      productions: ProductionRepo.all(),
     });
   }, [_repoV]);
 
@@ -297,7 +303,10 @@ function Dashboard() {
       // Note (an increase note) adds to it instead — see returnValueExTax.
       returnValueExTax(periodSaleReturns) -
       periodCogs -
-      totalExpense -
+      totalExpense +
+      // Same give-back as the P&L report: production labour already inside
+      // COGS must not also be deducted as the wage expense.
+      absorbedConversionCost(data.productions, start, end) -
       totalSettlementDiscount(periodPayments.filter((p) => p.type === "in")) +
       totalSettlementDiscount(periodPayments.filter((p) => p.type === "out")),
   );

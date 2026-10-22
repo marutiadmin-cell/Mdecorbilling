@@ -12,7 +12,9 @@ import {
   CompanyRepo,
   BankRepo,
   JournalVoucherRepo,
+  ProductionRepo,
 } from "@/repositories";
+import { absorbedConversionCost } from "@/lib/production";
 import { matchesQuery } from "@/lib/search";
 import { fmtMoney, fmtDate, today } from "@/lib/format";
 import { useFinancialYear } from "@/store/financialYear";
@@ -460,7 +462,8 @@ function ReportView({
     // as a regular expense entry — it's just recorded via a different form.
     const jvExpense = jvInRange.reduce(
       (a, jv) =>
-        a + jv.lines.filter((l) => l.kind === "expense").reduce((s, l) => s + (l.debit - l.credit), 0),
+        a +
+        jv.lines.filter((l) => l.kind === "expense").reduce((s, l) => s + (l.debit - l.credit), 0),
       0,
     );
     const exp = expenses.reduce((a, s) => a + s.amount, 0) + jvExpense;
@@ -469,7 +472,11 @@ function ReportView({
     // inflate profit. A discount a SUPPLIER gave us works the other way.
     const discountAllowed = totalSettlementDiscount(payments.filter((p) => p.type === "in"));
     const discountReceived = totalSettlementDiscount(payments.filter((p) => p.type === "out"));
-    const netProfit = r2(grossProfit - exp - discountAllowed + discountReceived);
+    // Labour/overhead that production runs put into stock — paid wages are in
+    // `exp`, and the same labour is inside COGS for every made item sold, so
+    // it is given back here once (see absorbedConversionCost).
+    const absorbed = absorbedConversionCost(ProductionRepo.all(), dateFrom, dateTo);
+    const netProfit = r2(grossProfit - exp + absorbed - discountAllowed + discountReceived);
 
     return (
       <div className="max-w-2xl">
@@ -511,6 +518,9 @@ function ReportView({
           <PLRow label="Operating Expenses" value={-exp} />
           {discountAllowed > 0 && (
             <PLRow label="Discount Allowed (settlements)" value={-discountAllowed} />
+          )}
+          {absorbed > 0 && (
+            <PLRow label="Labour & overhead moved into stock (production)" value={absorbed} />
           )}
           {discountReceived > 0 && (
             <PLRow label="Discount Received (settlements)" value={discountReceived} />

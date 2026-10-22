@@ -481,6 +481,12 @@ function SettingsPage() {
                   placeholder="PI-"
                   onChange={(e) => setC({ ...c, proformaPrefix: e.target.value })}
                 />
+                <Field
+                  label="Production Prefix"
+                  value={c.productionPrefix ?? ""}
+                  placeholder="MFG-"
+                  onChange={(e) => setC({ ...c, productionPrefix: e.target.value })}
+                />
                 {(() => {
                   /* Said out loud the moment two series would collide. The
                      symptom otherwise is a gap in the tax-invoice numbering

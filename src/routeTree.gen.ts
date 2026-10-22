@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as BankRouteImport } from './routes/bank'
+import { Route as BomsRouteImport } from './routes/boms'
 import { Route as CashRouteImport } from './routes/cash'
 import { Route as DaybookRouteImport } from './routes/daybook'
 import { Route as DocumentsRouteImport } from './routes/documents'
@@ -23,6 +24,7 @@ import { Route as LoginRouteImport } from './routes/login'
 import { Route as PartiesRouteImport } from './routes/parties'
 import { Route as PayeesRouteImport } from './routes/payees'
 import { Route as PaymentsRouteImport } from './routes/payments'
+import { Route as ProductionsRouteImport } from './routes/productions'
 import { Route as ProformaRouteImport } from './routes/proforma'
 import { Route as QuotationsRouteImport } from './routes/quotations'
 import { Route as ReportsRouteImport } from './routes/reports'
@@ -56,6 +58,11 @@ const IndexRoute = IndexRouteImport.update({
 const BankRoute = BankRouteImport.update({
   id: '/bank',
   path: '/bank',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const BomsRoute = BomsRouteImport.update({
+  id: '/boms',
+  path: '/boms',
   getParentRoute: () => rootRouteImport,
 } as any)
 const CashRoute = CashRouteImport.update({
@@ -116,6 +123,11 @@ const PayeesRoute = PayeesRouteImport.update({
 const PaymentsRoute = PaymentsRouteImport.update({
   id: '/payments',
   path: '/payments',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ProductionsRoute = ProductionsRouteImport.update({
+  id: '/productions',
+  path: '/productions',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ProformaRoute = ProformaRouteImport.update({
@@ -242,6 +254,7 @@ const SalesEditIdRoute = SalesEditIdRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/bank': typeof BankRoute
+  '/boms': typeof BomsRoute
   '/cash': typeof CashRoute
   '/daybook': typeof DaybookRoute
   '/documents': typeof DocumentsRoute
@@ -254,6 +267,7 @@ export interface FileRoutesByFullPath {
   '/parties': typeof PartiesRoute
   '/payees': typeof PayeesRoute
   '/payments': typeof PaymentsRoute
+  '/productions': typeof ProductionsRoute
   '/proforma': typeof ProformaRoute
   '/quotations': typeof QuotationsRoute
   '/reports': typeof ReportsRoute
@@ -282,6 +296,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/bank': typeof BankRoute
+  '/boms': typeof BomsRoute
   '/cash': typeof CashRoute
   '/daybook': typeof DaybookRoute
   '/documents': typeof DocumentsRoute
@@ -294,6 +309,7 @@ export interface FileRoutesByTo {
   '/parties': typeof PartiesRoute
   '/payees': typeof PayeesRoute
   '/payments': typeof PaymentsRoute
+  '/productions': typeof ProductionsRoute
   '/proforma': typeof ProformaRoute
   '/quotations': typeof QuotationsRoute
   '/reports': typeof ReportsRoute
@@ -323,6 +339,7 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/bank': typeof BankRoute
+  '/boms': typeof BomsRoute
   '/cash': typeof CashRoute
   '/daybook': typeof DaybookRoute
   '/documents': typeof DocumentsRoute
@@ -335,6 +352,7 @@ export interface FileRoutesById {
   '/parties': typeof PartiesRoute
   '/payees': typeof PayeesRoute
   '/payments': typeof PaymentsRoute
+  '/productions': typeof ProductionsRoute
   '/proforma': typeof ProformaRoute
   '/quotations': typeof QuotationsRoute
   '/reports': typeof ReportsRoute
@@ -365,6 +383,7 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/bank'
+    | '/boms'
     | '/cash'
     | '/daybook'
     | '/documents'
@@ -377,6 +396,7 @@ export interface FileRouteTypes {
     | '/parties'
     | '/payees'
     | '/payments'
+    | '/productions'
     | '/proforma'
     | '/quotations'
     | '/reports'
@@ -405,6 +425,7 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/bank'
+    | '/boms'
     | '/cash'
     | '/daybook'
     | '/documents'
@@ -417,6 +438,7 @@ export interface FileRouteTypes {
     | '/parties'
     | '/payees'
     | '/payments'
+    | '/productions'
     | '/proforma'
     | '/quotations'
     | '/reports'
@@ -445,6 +467,7 @@ export interface FileRouteTypes {
     | '__root__'
     | '/'
     | '/bank'
+    | '/boms'
     | '/cash'
     | '/daybook'
     | '/documents'
@@ -457,6 +480,7 @@ export interface FileRouteTypes {
     | '/parties'
     | '/payees'
     | '/payments'
+    | '/productions'
     | '/proforma'
     | '/quotations'
     | '/reports'
@@ -486,6 +510,7 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   BankRoute: typeof BankRoute
+  BomsRoute: typeof BomsRoute
   CashRoute: typeof CashRoute
   DaybookRoute: typeof DaybookRoute
   DocumentsRoute: typeof DocumentsRoute
@@ -498,6 +523,7 @@ export interface RootRouteChildren {
   PartiesRoute: typeof PartiesRoute
   PayeesRoute: typeof PayeesRoute
   PaymentsRoute: typeof PaymentsRoute
+  ProductionsRoute: typeof ProductionsRoute
   ProformaRoute: typeof ProformaRoute
   QuotationsRoute: typeof QuotationsRoute
   ReportsRoute: typeof ReportsRoute
@@ -538,6 +564,13 @@ declare module '@tanstack/react-router' {
       path: '/bank'
       fullPath: '/bank'
       preLoaderRoute: typeof BankRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/boms': {
+      id: '/boms'
+      path: '/boms'
+      fullPath: '/boms'
+      preLoaderRoute: typeof BomsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/cash': {
@@ -622,6 +655,13 @@ declare module '@tanstack/react-router' {
       path: '/payments'
       fullPath: '/payments'
       preLoaderRoute: typeof PaymentsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/productions': {
+      id: '/productions'
+      path: '/productions'
+      fullPath: '/productions'
+      preLoaderRoute: typeof ProductionsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/proforma': {
@@ -798,6 +838,7 @@ declare module '@tanstack/react-router' {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   BankRoute: BankRoute,
+  BomsRoute: BomsRoute,
   CashRoute: CashRoute,
   DaybookRoute: DaybookRoute,
   DocumentsRoute: DocumentsRoute,
@@ -810,6 +851,7 @@ const rootRouteChildren: RootRouteChildren = {
   PartiesRoute: PartiesRoute,
   PayeesRoute: PayeesRoute,
   PaymentsRoute: PaymentsRoute,
+  ProductionsRoute: ProductionsRoute,
   ProformaRoute: ProformaRoute,
   QuotationsRoute: QuotationsRoute,
   ReportsRoute: ReportsRoute,
