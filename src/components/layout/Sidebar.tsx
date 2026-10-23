@@ -28,6 +28,8 @@ import {
   ScrollText,
   ClipboardList,
   Factory,
+  Scale,
+  SlidersHorizontal,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useWorkspace } from "@/store/workspace";
@@ -130,6 +132,15 @@ const groups: NavGroup[] = [
       { path: "/reports", label: "Reports", icon: BarChart3, key: "7" },
       { path: "/daybook", label: "Daybook", icon: BookOpen },
       { path: "/gst", label: "GST Returns", icon: FileText },
+    ],
+  },
+  // The CA's statements and their register — owner only, like Settings.
+  {
+    title: "Accounts",
+    module: "owner",
+    items: [
+      { path: "/financials", label: "Balance Sheet", icon: Scale },
+      { path: "/balance-sheet-setup", label: "Balance Sheet Setup", icon: SlidersHorizontal },
     ],
   },
   {

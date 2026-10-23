@@ -10,12 +10,14 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as BalanceSheetSetupRouteImport } from './routes/balance-sheet-setup'
 import { Route as BankRouteImport } from './routes/bank'
 import { Route as BomsRouteImport } from './routes/boms'
 import { Route as CashRouteImport } from './routes/cash'
 import { Route as DaybookRouteImport } from './routes/daybook'
 import { Route as DocumentsRouteImport } from './routes/documents'
 import { Route as ExpensesRouteImport } from './routes/expenses'
+import { Route as FinancialsRouteImport } from './routes/financials'
 import { Route as GstRouteImport } from './routes/gst'
 import { Route as InventoryRouteImport } from './routes/inventory'
 import { Route as ItemsRouteImport } from './routes/items'
@@ -55,6 +57,11 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const BalanceSheetSetupRoute = BalanceSheetSetupRouteImport.update({
+  id: '/balance-sheet-setup',
+  path: '/balance-sheet-setup',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const BankRoute = BankRouteImport.update({
   id: '/bank',
   path: '/bank',
@@ -83,6 +90,11 @@ const DocumentsRoute = DocumentsRouteImport.update({
 const ExpensesRoute = ExpensesRouteImport.update({
   id: '/expenses',
   path: '/expenses',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const FinancialsRoute = FinancialsRouteImport.update({
+  id: '/financials',
+  path: '/financials',
   getParentRoute: () => rootRouteImport,
 } as any)
 const GstRoute = GstRouteImport.update({
@@ -253,12 +265,14 @@ const SalesEditIdRoute = SalesEditIdRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/balance-sheet-setup': typeof BalanceSheetSetupRoute
   '/bank': typeof BankRoute
   '/boms': typeof BomsRoute
   '/cash': typeof CashRoute
   '/daybook': typeof DaybookRoute
   '/documents': typeof DocumentsRoute
   '/expenses': typeof ExpensesRoute
+  '/financials': typeof FinancialsRoute
   '/gst': typeof GstRoute
   '/inventory': typeof InventoryRoute
   '/items': typeof ItemsRoute
@@ -295,12 +309,14 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/balance-sheet-setup': typeof BalanceSheetSetupRoute
   '/bank': typeof BankRoute
   '/boms': typeof BomsRoute
   '/cash': typeof CashRoute
   '/daybook': typeof DaybookRoute
   '/documents': typeof DocumentsRoute
   '/expenses': typeof ExpensesRoute
+  '/financials': typeof FinancialsRoute
   '/gst': typeof GstRoute
   '/inventory': typeof InventoryRoute
   '/items': typeof ItemsRoute
@@ -338,12 +354,14 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/balance-sheet-setup': typeof BalanceSheetSetupRoute
   '/bank': typeof BankRoute
   '/boms': typeof BomsRoute
   '/cash': typeof CashRoute
   '/daybook': typeof DaybookRoute
   '/documents': typeof DocumentsRoute
   '/expenses': typeof ExpensesRoute
+  '/financials': typeof FinancialsRoute
   '/gst': typeof GstRoute
   '/inventory': typeof InventoryRoute
   '/items': typeof ItemsRoute
@@ -382,12 +400,14 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/balance-sheet-setup'
     | '/bank'
     | '/boms'
     | '/cash'
     | '/daybook'
     | '/documents'
     | '/expenses'
+    | '/financials'
     | '/gst'
     | '/inventory'
     | '/items'
@@ -424,12 +444,14 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/balance-sheet-setup'
     | '/bank'
     | '/boms'
     | '/cash'
     | '/daybook'
     | '/documents'
     | '/expenses'
+    | '/financials'
     | '/gst'
     | '/inventory'
     | '/items'
@@ -466,12 +488,14 @@ export interface FileRouteTypes {
   id:
     | '__root__'
     | '/'
+    | '/balance-sheet-setup'
     | '/bank'
     | '/boms'
     | '/cash'
     | '/daybook'
     | '/documents'
     | '/expenses'
+    | '/financials'
     | '/gst'
     | '/inventory'
     | '/items'
@@ -509,12 +533,14 @@ export interface FileRouteTypes {
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  BalanceSheetSetupRoute: typeof BalanceSheetSetupRoute
   BankRoute: typeof BankRoute
   BomsRoute: typeof BomsRoute
   CashRoute: typeof CashRoute
   DaybookRoute: typeof DaybookRoute
   DocumentsRoute: typeof DocumentsRoute
   ExpensesRoute: typeof ExpensesRoute
+  FinancialsRoute: typeof FinancialsRoute
   GstRoute: typeof GstRoute
   InventoryRoute: typeof InventoryRoute
   ItemsRoute: typeof ItemsRoute
@@ -559,6 +585,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/balance-sheet-setup': {
+      id: '/balance-sheet-setup'
+      path: '/balance-sheet-setup'
+      fullPath: '/balance-sheet-setup'
+      preLoaderRoute: typeof BalanceSheetSetupRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/bank': {
       id: '/bank'
       path: '/bank'
@@ -599,6 +632,13 @@ declare module '@tanstack/react-router' {
       path: '/expenses'
       fullPath: '/expenses'
       preLoaderRoute: typeof ExpensesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/financials': {
+      id: '/financials'
+      path: '/financials'
+      fullPath: '/financials'
+      preLoaderRoute: typeof FinancialsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/gst': {
@@ -837,12 +877,14 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  BalanceSheetSetupRoute: BalanceSheetSetupRoute,
   BankRoute: BankRoute,
   BomsRoute: BomsRoute,
   CashRoute: CashRoute,
   DaybookRoute: DaybookRoute,
   DocumentsRoute: DocumentsRoute,
   ExpensesRoute: ExpensesRoute,
+  FinancialsRoute: FinancialsRoute,
   GstRoute: GstRoute,
   InventoryRoute: InventoryRoute,
   ItemsRoute: ItemsRoute,

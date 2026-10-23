@@ -584,6 +584,8 @@ async function runAll(): Promise<Results> {
       "/purchase-return",
       "/boms",
       "/productions",
+      "/financials",
+      "/balance-sheet-setup",
     ];
 
     for (const route of PHONE_ROUTES) {
@@ -997,6 +999,8 @@ async function runAll(): Promise<Results> {
     ["/inventory", "USB Cable"],
     ["/boms", "Bill of Materials"],
     ["/productions", "Production"],
+    ["/financials", "Sources of funds"],
+    ["/balance-sheet-setup", "Accounts register"],
     ["/sales", "INV-0001"],
     ["/purchase", "PUR-0001"],
     ["/sale-return", "CR-0001"],
@@ -6104,6 +6108,58 @@ async function runAll(): Promise<Results> {
     has(sofaHistory, "Produced", "production: the sofa's history shows it was made");
     const fabricHistory = await renderRoute("/items/MF-FAB");
     has(fabricHistory, "Consumed", "production: the fabric's history shows it was used");
+  }
+
+  /* ── The balance sheet over EVERYTHING this suite has seeded ──────────
+     By now the in-memory books hold every awkward document the other blocks
+     created — split bills, settlement discounts, returns, journal vouchers,
+     transfers, a production run. Whatever is in them, the statements must
+     balance, and every tab must render. */
+  {
+    const fin = await renderRoute("/financials");
+    has(fin, "Total application of funds", "financials: the ITR-3 balance sheet renders");
+    has(
+      fin,
+      "Balanced — both sides agree.",
+      "financials: sources = application on the seeded books",
+    );
+    {
+      // Text in the DOM is not the same as text on screen: a hidden print-only
+      // container passes every text check and shows the owner a blank page.
+      const sheet = host?.querySelector(".print-visible") as HTMLElement | null;
+      assert(
+        !!sheet && sheet.offsetHeight > 200,
+        `financials: the statement is visible on screen (height ${sheet?.offsetHeight})`,
+      );
+    }
+    const tabs = [
+      "Balance Sheet (T-format)",
+      "Trading & P&L",
+      "Trial Balance",
+      "Schedules",
+      "Checks",
+    ];
+    for (const t of tabs) {
+      const btn = Array.from(document.querySelectorAll('[role="tab"]')).find((b) =>
+        (b.textContent ?? "").includes(t),
+      ) as HTMLButtonElement | undefined;
+      assert(!!btn, `financials: the "${t}" tab exists`);
+      await act(async () => {
+        btn?.click();
+      });
+      await settleMs(120);
+      const text = host?.textContent ?? "";
+      assert(!/NaN/.test(text), `financials: "${t}" shows no NaN`);
+      if (t !== "Schedules" && t !== "Checks")
+        has(text, "Balanced — both sides agree.", `financials: "${t}" balances`);
+    }
+    has(
+      host?.textContent ?? "",
+      "Assets = liabilities + capital, to the paisa",
+      "financials: the check passes",
+    );
+    const setup = await renderRoute("/balance-sheet-setup");
+    has(setup, "Expense categories", "setup: lists the expense categories");
   }
 
   if (root) root.unmount();

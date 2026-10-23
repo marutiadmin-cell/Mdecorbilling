@@ -63,6 +63,7 @@ import {
   largestSplitMode,
 } from "@/lib/paymentSplit";
 import { readFileSync } from "node:fs";
+import { runFinancialsAudit } from "./financials.audit";
 import { ledgerColumns } from "@/lib/ledger";
 import {
   classifySendFailure,
@@ -4424,6 +4425,9 @@ console.log(`\n═════════════════════�
   );
   assert(absorbed === 6000, "MC19: labour moved into stock counts once, inside the period");
 }
+
+/* ═══════ TEST FS: the financial statements (see tests/financials.audit.ts) ═══ */
+runFinancialsAudit(assert);
 
 console.log(`  AUDIT RESULT: ${passed} assertions passed, ${failed} failed`);
 if (fails.length) {

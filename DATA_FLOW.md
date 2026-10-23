@@ -130,6 +130,14 @@ JOURNAL VOUCHER a bill-wise line settles the bill once: through its `paid`, not 
 
 Every one of these is written atomically, reversed correctly on edit/delete, and re-derived into the dashboards/reports — never stored as a running total.
 
+## 6. Financial statements (owner only)
+
+- **Accounts → Balance Sheet** (`/financials`) and **Balance Sheet Setup** (`/balance-sheet-setup`), both owner-only (root gate + `bs-accounts` / `fin-config` rules).
+- `lib/postings.ts` turns every document into balanced Dr/Cr postings (integer paise) that mirror the existing screens: party credited at billing with `paid − settledAfterBilling`, money where `splitsOf` says, GST from the stored `taxAmount`. Anything a document cannot explain goes to a named suspense account, listed on the Checks tab.
+- `lib/stockValuation.ts`: closing stock at moving weighted average (AS-2); production output = materials consumed at average + labour/overhead.
+- `lib/financials.ts`: periodic Trading & P&L, capital account (opening = net assets the day before the period), ITR-3 Part A-BS and T-format, trial balance, schedules. Closing capital is checked against assets − liabilities; the audit suite pins the difference at exactly 0 on randomized books.
+- Capital, drawings, loans, fixed assets: Journal Vouchers to ledger names classified in the register; depreciation is posted as a JV by the Setup page helper (Income-tax WDV, half rate under 180 days).
+
 ---
 
 _Generated as a reference for the current production build (v26)._

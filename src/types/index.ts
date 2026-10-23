@@ -659,6 +659,67 @@ export interface JournalVoucher {
   createdAt: string;
 }
 
+/**
+ * Where a named account sits in the financial statements — the ITR-3
+ * "Part A-BS" headings a CA files under, plus the profit-and-loss heads a
+ * Journal Voucher ledger can be. Assigned to a JV ledger name (Capital A/c,
+ * HDFC Car Loan, Machinery, Depreciation…) on the Balance Sheet Setup page.
+ */
+export type BsGroup =
+  // Proprietor's fund
+  | "capital"
+  | "drawings"
+  | "reserves"
+  // Loan funds
+  | "securedLoan"
+  | "unsecuredLoan"
+  // Current liabilities & provisions
+  | "otherCurrentLiability"
+  | "provision"
+  | "dutiesTaxes"
+  // Application of funds
+  | "fixedAsset"
+  | "investment"
+  | "loansAdvances"
+  | "otherCurrentAsset"
+  // Profit & loss
+  | "otherIncome"
+  | "indirectExpense"
+  | "directExpense";
+
+/** A named account on the balance-sheet register. Its day-to-day movements
+ *  are ordinary Journal Voucher lines whose ledger name matches `name`. */
+export interface BsAccount {
+  id: ID;
+  name: string;
+  group: BsGroup;
+  /** Balance on the books-start date, before any document. Not offered for
+   *  capital/drawings: a proprietor's opening capital is what the opening
+   *  balances add up to, not a figure of its own. */
+  openingBalance?: number;
+  openingSide?: "dr" | "cr";
+  /** Fixed assets: Income-tax WDV rate, percent a year. */
+  depreciationRate?: number;
+  notes?: string;
+  createdAt: string;
+}
+
+/** How an expense category is reported: an ordinary (indirect) P&L expense,
+ *  a direct cost in the Trading account, the owner's drawings, or posted to a
+ *  named register account (e.g. "GST paid" → GST Payable). */
+export type ExpenseClass = "indirect" | "direct" | "drawings" | `account:${string}`;
+
+/** The one settings document of the balance-sheet register (id "config").
+ *  Kept out of Company on purpose: the Settings page saves the whole Company
+ *  object, so anything stored there by another page gets overwritten. */
+export interface FinConfig {
+  id: ID;
+  /** The date the opening balances are as at. */
+  booksStartDate?: string;
+  expenseClass?: Record<string, ExpenseClass>;
+  createdAt: string;
+}
+
 export type PrintFormat = "a4" | "a4-2up" | "thermal80" | "thermal58";
 
 export interface Company {

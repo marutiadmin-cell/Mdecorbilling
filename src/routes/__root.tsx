@@ -401,7 +401,13 @@ function AuthGate() {
   // Settings is never a configurable permission, owner-only always, so a
   // staff member editing their own permissions can never grant themselves
   // broader access through it.
-  const isSettingsPath = pathname === "/settings" || pathname.startsWith("/settings/");
+  // The financial statements and their register are the owner's alone too —
+  // capital, drawings and loans are not a team permission.
+  const isSettingsPath =
+    pathname === "/settings" ||
+    pathname.startsWith("/settings/") ||
+    pathname === "/financials" ||
+    pathname === "/balance-sheet-setup";
   const module = moduleForPath(pathname);
   const editModule = editModuleForPath(pathname);
   const blocked =

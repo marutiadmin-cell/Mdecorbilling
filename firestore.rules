@@ -188,6 +188,16 @@ service cloud.firestore {
     // their own rules. There's nothing to add a rule for here; "reports"
     // permission is enforced entirely in the UI (see src/routes/__root.tsx).
 
+    // ---- Balance-sheet register (owner only) ----
+    // Capital, drawings, loans and the CA's statements are the owner's
+    // business alone — no team permission reaches them.
+    match /bs-accounts/{id} {
+      allow read, write: if isOwner();
+    }
+    match /fin-config/{id} {
+      allow read, write: if isOwner();
+    }
+
     // ---- Company settings ----
     // Read is universal for any active user (invoice numbering, GST calc,
     // and expense category dropdowns all depend on this doc everywhere, not

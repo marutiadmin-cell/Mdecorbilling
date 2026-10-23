@@ -23,6 +23,8 @@ import type {
   JournalVoucher,
   Bom,
   Production,
+  BsAccount,
+  FinConfig,
 } from "@/types";
 
 export const PartyRepo = new Repository<Party>("parties");
@@ -52,6 +54,12 @@ export const JournalVoucherRepo = new Repository<JournalVoucher>("journal-vouche
    src/lib/production.ts. */
 export const BomRepo = new Repository<Bom>("boms");
 export const ProductionRepo = new Repository<Production>("productions");
+/* The balance-sheet register — owner-only, read by the financial
+   statements. Deliberately absent from MODULE_REPOS: only the owner's
+   device loads it (see firestore.rules). FinConfig is one document, id
+   "config"; it is not on Company because Settings saves Company whole. */
+export const BsAccountRepo = new Repository<BsAccount>("bs-accounts");
+export const FinConfigRepo = new Repository<FinConfig>("fin-config");
 
 const defaultCompany: Company = {
   name: "My Company",
@@ -313,6 +321,8 @@ export const REPO_BY_KEY: Record<string, Repository<{ id: string }>> = {
   "bz.journal-vouchers": JournalVoucherRepo as Repository<{ id: string }>,
   "bz.boms": BomRepo as Repository<{ id: string }>,
   "bz.productions": ProductionRepo as Repository<{ id: string }>,
+  "bz.bs-accounts": BsAccountRepo as Repository<{ id: string }>,
+  "bz.fin-config": FinConfigRepo as Repository<{ id: string }>,
 };
 
 const ALL_REPOS = Object.values(REPO_BY_KEY);
@@ -399,7 +409,10 @@ export async function hydrateRepos(uid: string, email: string): Promise<void> {
  * don't need it: they're reactive and fill in.
  */
 export function areReposHydrated(): boolean {
-  return hydrationComplete;
+  // Without a browser there is no Firestore to wait for: the in-memory cache
+  // is all the data there is (the screen tests seed it directly), and the
+  // server render never gets past the splash screen anyway.
+  return hydrationComplete || !isBrowser;
 }
 
 /** Resolves once every collection started by the last hydrateRepos() has had
