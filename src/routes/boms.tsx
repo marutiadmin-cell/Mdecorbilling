@@ -11,6 +11,7 @@ import { usePermissions } from "@/hooks/usePermissions";
 import { matchesQuery } from "@/lib/search";
 import { fmtMoney } from "@/lib/format";
 import { bomCycle, bomUnitCost, MAX_BOM_COMPONENTS } from "@/lib/production";
+import { averageCostMap, costOf } from "@/lib/finData";
 import type { Bom, BomComponent, CostLine, Item } from "@/types";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -38,7 +39,11 @@ const COST_LABELS = [
   "Electricity & overhead",
 ];
 
-const itemsMap = (items: Item[]) => new Map(items.map((i) => [i.id, i] as const));
+/** Items keyed by id, each carrying its weighted-average COST in
+ *  `purchasePrice` (which on the item itself is only the last purchase rate)
+ *  — so every material in a recipe is priced the way stock is valued. */
+const itemsMap = (items: Item[], avg: Map<string, number>) =>
+  new Map(items.map((i) => [i.id, { ...i, purchasePrice: costOf(avg, i) }] as const));
 
 function BomsPage() {
   const { isOwner, canEdit, canDelete } = usePermissions();
@@ -53,7 +58,8 @@ function BomsPage() {
   useAutoFocusOnDesktop(searchRef);
 
   const items = useRepoMemo(() => ItemRepo.all());
-  const byId = itemsMap(items);
+  const avgCosts = useRepoMemo(() => averageCostMap());
+  const byId = itemsMap(items, avgCosts);
   const rows = useRepoMemo(
     () =>
       BomRepo.all()
@@ -326,7 +332,8 @@ function BomDialog({
     setArchived(!!bom?.archived);
   }, [open, bom]);
 
-  const byId = itemsMap(items);
+  const avgCosts = useRepoMemo(() => averageCostMap());
+  const byId = itemsMap(items, avgCosts);
   const finished = byId.get(finishedId);
   // Finished goods first in the picker, then everything else — any item can
   // still be chosen (a trading item made here once is still a finished item).

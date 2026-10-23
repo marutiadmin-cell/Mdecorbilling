@@ -284,3 +284,15 @@ function snapshot(date: string, state: Map<string, Pos>, items: Map<string, Item
   out.sort((a, b) => a.name.localeCompare(b.name));
   return { date, items: out, total: r2(total), byKind };
 }
+
+/**
+ * Every item's weighted-average cost per unit right now — after every
+ * document there is. This is the item's COST (what a sale costs the shop,
+ * what stock is worth, what a BOM's materials cost), the way Tally, Zoho and
+ * Busy keep it. `Item.purchasePrice` stays what it always was: the LAST
+ * purchase rate, kept to pre-fill the next purchase bill.
+ */
+export function averageCosts(data: StockData): Map<string, number> {
+  const [s] = stockSnapshots(data, ["9999-12-31"]);
+  return new Map(s.items.map((p) => [p.itemId, p.rate] as const));
+}

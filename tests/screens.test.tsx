@@ -6106,6 +6106,9 @@ async function runAll(): Promise<Results> {
     has(list, "MFG-0001", "production: listed in the register");
     const sofaHistory = await renderRoute("/items/MF-SOFA");
     has(sofaHistory, "Produced", "production: the sofa's history shows it was made");
+    // Its cost is its weighted average — here the one run, 10,200 a sofa.
+    has(sofaHistory, "Average Cost", "item page: shows the average cost");
+    has(sofaHistory, fmtMoney(10200), "item page: average cost of the made sofa is 10,200");
     const fabricHistory = await renderRoute("/items/MF-FAB");
     has(fabricHistory, "Consumed", "production: the fabric's history shows it was used");
   }

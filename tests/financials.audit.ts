@@ -37,7 +37,7 @@ import {
   paise,
   type BooksData,
 } from "@/lib/postings";
-import { stockSnapshots, type StockData } from "@/lib/stockValuation";
+import { stockSnapshots, averageCosts, type StockData } from "@/lib/stockValuation";
 import { buildFinancials, wdvDepreciation, dayBefore } from "@/lib/financials";
 import { buildPartyStatement, buildBankLedger, cashFlows } from "@/lib/ledger";
 
@@ -76,6 +76,7 @@ const finInput = (b: BooksData & StockData, accounts: BsAccount[] = [], config?:
 export function runFinancialsAudit(assert: Assert) {
   handWorked(assert);
   valuation(assert);
+  averageCost(assert);
   depreciation(assert);
   randomized(assert);
 }
@@ -1005,3 +1006,72 @@ function randomized(assert: Assert) {
 }
 
 const approx = (a: number, b: number, eps = 0.02) => Math.abs(a - b) <= eps;
+
+/* ═══ FS-A: an item's cost is its weighted average, not its last rate ════
+   Bought 10 m at ₹300 and later 10 m at ₹350: the last purchase rate is 350,
+   but every metre on the shelf cost on average 325 — that is its cost.
+   After selling 5 m the average does not move (goods leave AT average). */
+function averageCost(assert: Assert) {
+  const b = emptyBooks();
+  b.items = [
+    {
+      id: "F",
+      name: "Fabric",
+      unit: "MTR",
+      gstRate: 5,
+      purchasePrice: 350,
+      salePrice: 0,
+      stock: 15,
+      openingStock: 0,
+      createdAt: "",
+    } as Item,
+  ];
+  const bill = (id: string, date: string, qty: number, price: number) =>
+    ({
+      id,
+      number: id,
+      date,
+      partyId: "X",
+      partyName: "X",
+      subtotal: 0,
+      discount: 0,
+      taxAmount: 0,
+      total: 0,
+      paid: 0,
+      paymentMode: "credit",
+      createdAt: date,
+      lineItems: [
+        {
+          id: "l",
+          itemId: "F",
+          name: "F",
+          qty,
+          unit: "MTR",
+          price,
+          discountPct: 0,
+          gstRate: 5,
+          amount: 0,
+        },
+      ],
+    }) as Invoice;
+  b.purchases = [bill("P1", "2026-05-01", 10, 300), bill("P2", "2026-06-01", 10, 350)];
+  assert(
+    averageCosts(b).get("F") === 325,
+    `FSA1: average of 10 @ 300 and 10 @ 350 is 325, got ${averageCosts(b).get("F")}`,
+  );
+  b.sales = [bill("S1", "2026-06-02", 5, 500)];
+  assert(averageCosts(b).get("F") === 325, "FSA2: selling does not change the average");
+  // An item never bought falls back to its opening/purchase price.
+  b.items.push({
+    id: "G",
+    name: "Glue",
+    unit: "PCS",
+    gstRate: 18,
+    purchasePrice: 40,
+    salePrice: 0,
+    stock: 0,
+    openingStock: 0,
+    createdAt: "",
+  } as Item);
+  assert(averageCosts(b).get("G") === 40, "FSA3: no history → the price typed on the item");
+}

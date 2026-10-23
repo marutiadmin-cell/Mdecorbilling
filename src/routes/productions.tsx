@@ -30,6 +30,7 @@ import {
   scaledCosts,
   stockShortfalls,
 } from "@/lib/production";
+import { averageCostMap, costOf } from "@/lib/finData";
 import type { CostLine, Production, ProductionLine } from "@/types";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -398,7 +399,13 @@ function ProductionDialog({
   const items = useRepoMemo(() => ItemRepo.all());
   const boms = useRepoMemo(() => BomRepo.all());
   const parties = useRepoMemo(() => PartyRepo.all().filter((p) => !p.archived));
-  const byId = new Map(items.map((i) => [i.id, i] as const));
+  // Materials are costed at their weighted average — the way stock is valued
+  // — carried in `purchasePrice` (on the item itself that is only the last
+  // purchase rate).
+  const avgCosts = useRepoMemo(() => averageCostMap());
+  const byId = new Map(
+    items.map((i) => [i.id, { ...i, purchasePrice: costOf(avgCosts, i) }] as const),
+  );
 
   const [bomId, setBomId] = useState(NO_BOM);
   const [finishedId, setFinishedId] = useState("");
@@ -518,6 +525,9 @@ function ProductionDialog({
       (p) => p.name.trim().toLowerCase() === partyName.trim().toLowerCase(),
     );
     const all = ProductionRepo.all();
+    // The finished item's STORED last-cost field — not the average-cost copy
+    // in byId — is what this run replaces and what a delete puts back.
+    const storedLastCost = ItemRepo.get(finishedId)?.purchasePrice ?? 0;
     const batch = newBatch();
 
     // 1. Take back what the old version posted (edit), as every other edit
@@ -539,11 +549,11 @@ function ProductionDialog({
     let prevFinishedCost = production?.prevFinishedCost;
     let setCost = false;
     if (!production) {
-      prevFinishedCost = finished.purchasePrice;
+      prevFinishedCost = storedLastCost;
       setCost = true;
     } else if (production.finishedItemId === finishedId) {
       const isLatest = latestProductionOf(finishedId, all)?.id === production.id;
-      const untouched = Math.abs((finished.purchasePrice ?? 0) - production.unitCost) <= 0.005;
+      const untouched = Math.abs(storedLastCost - production.unitCost) <= 0.005;
       setCost = isLatest && untouched;
     } else {
       const restore = costToRestore(production, ItemRepo.get(production.finishedItemId), all);
@@ -552,7 +562,7 @@ function ProductionDialog({
           purchasePrice: restore,
         });
       }
-      prevFinishedCost = finished.purchasePrice;
+      prevFinishedCost = storedLastCost;
       setCost = true;
     }
     if (setCost) {
@@ -749,7 +759,7 @@ function ProductionDialog({
                           itemId: item.id,
                           itemName: item.name,
                           unit: item.unit,
-                          rate: r2(item.purchasePrice || 0),
+                          rate: r2(costOf(avgCosts, item)),
                         })
                       }
                       ariaLabel="Material"

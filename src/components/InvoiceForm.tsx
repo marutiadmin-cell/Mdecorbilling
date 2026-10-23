@@ -44,6 +44,10 @@ import type {
   AdditionalCharge,
 } from "@/types";
 import { fmtMoney, fmtDate, today } from "@/lib/format";
+import { averageCostMap, costOf } from "@/lib/finData";
+
+/** A cost per unit kept to the paisa, as every snapshot is. */
+const r2Cost = (n: number) => Math.round(n * 100) / 100;
 import { toast } from "sonner";
 import { bankParts, splitProblems, largestSplitMode } from "@/lib/paymentSplit";
 import { SplitPaymentRows } from "@/components/SplitPaymentRows";
@@ -261,6 +265,11 @@ export function InvoiceForm({ mode, existing, initialDocType, fromEstimateId }: 
   const allParties = useRepoMemo(() => PartyRepo.all());
   const parties = useMemo(() => allParties.filter(partyFilter), [allParties]);
   const items = useRepoMemo(() => ItemRepo.all());
+  // Each item's weighted-average cost — what a sale line records as its
+  // cost (profit) and what the picker shows as "cost". purchasePrice is only
+  // the LAST purchase rate (it pre-fills a purchase bill), not the cost.
+  const avgCosts = useRepoMemo(() => averageCostMap());
+  const itemCost = (it: Item) => r2Cost(costOf(avgCosts, it));
   const banks = useRepoMemo<BankAccount[]>(() => BankRepo.all());
   // Every charge name already used on a sale or purchase, so "Freight" typed
   // once is a suggestion forever after instead of being retyped (and
@@ -720,7 +729,7 @@ export function InvoiceForm({ mode, existing, initialDocType, fromEstimateId }: 
       discountPct: 0,
       gstRate: it.gstRate,
       amount: 0,
-      costPrice: it.purchasePrice,
+      costPrice: itemCost(it),
       hsn: it.hsn || undefined,
     };
     line.amount = lineAmount(line.qty, line.price, line.discountPct, line.gstRate, gstOn);
@@ -857,7 +866,7 @@ export function InvoiceForm({ mode, existing, initialDocType, fromEstimateId }: 
       unit: it.unit,
       gstRate: it.gstRate,
       price: isSale ? (it.salePrice ?? 0) : (historicalPrice ?? it.purchasePrice),
-      costPrice: it.purchasePrice,
+      costPrice: itemCost(it),
       hsn: it.hsn || undefined,
       // The old item's foreign price must not survive the swap — a later
       // exchange-rate change re-prices every line that still has one, which
@@ -2050,6 +2059,7 @@ export function InvoiceForm({ mode, existing, initialDocType, fromEstimateId }: 
                       <ItemNameCell
                         name={l.name}
                         items={items}
+                        costOf={itemCost}
                         isSale={isSale}
                         gstOn={gstOn}
                         onChange={(it) => changeLineItem(l.id, it)}
@@ -2147,6 +2157,7 @@ export function InvoiceForm({ mode, existing, initialDocType, fromEstimateId }: 
                   <ItemEntryRow
                     key={id}
                     items={items}
+                    costOf={itemCost}
                     gstOn={gstOn}
                     isSale={isSale}
                     isInternational={!!inv.isInternational}
@@ -2219,6 +2230,7 @@ export function InvoiceForm({ mode, existing, initialDocType, fromEstimateId }: 
                     <ItemNameCell
                       name={l.name}
                       items={items}
+                      costOf={itemCost}
                       isSale={isSale}
                       gstOn={gstOn}
                       onChange={(it) => changeLineItem(l.id, it)}
@@ -2325,6 +2337,7 @@ export function InvoiceForm({ mode, existing, initialDocType, fromEstimateId }: 
                 key={id}
                 layout="card"
                 items={items}
+                costOf={itemCost}
                 gstOn={gstOn}
                 isSale={isSale}
                 isInternational={!!inv.isInternational}
@@ -2758,6 +2771,7 @@ function Row({ label, value, bold }: { label: string; value: string; bold?: bool
 
 function ItemEntryRow({
   items,
+  costOf,
   onAdd,
   onAddNew,
   gstOn,
@@ -2769,6 +2783,8 @@ function ItemEntryRow({
   layout = "row",
 }: {
   items: Item[];
+  /** The item's weighted-average cost, shown as "cost" while picking. */
+  costOf: (it: Item) => number;
   onAdd: (i: Item) => void;
   onAddNew: (name: string) => void;
   gstOn: boolean;
@@ -2945,7 +2961,7 @@ function ItemEntryRow({
                     {isSale ? (
                       <>
                         <div className="text-[11px] text-muted-foreground tabular-nums">
-                          cost {fmtMoney(it.purchasePrice)}
+                          cost {fmtMoney(costOf(it))}
                         </div>
                         <div className="font-semibold tabular-nums">
                           {it.salePrice ? (
@@ -3075,6 +3091,7 @@ function ItemEntryRow({
 function ItemNameCell({
   name,
   items,
+  costOf,
   isSale,
   gstOn,
   onChange,
@@ -3084,6 +3101,7 @@ function ItemNameCell({
 }: {
   name: string;
   items: Item[];
+  costOf: (it: Item) => number;
   isSale: boolean;
   gstOn: boolean;
   /** Offered when what was typed matches nothing. Picking the wrong item and
@@ -3265,7 +3283,7 @@ function ItemNameCell({
                     {isSale ? (
                       <>
                         <div className="text-[11px] text-muted-foreground tabular-nums">
-                          cost {fmtMoney(it.purchasePrice)}
+                          cost {fmtMoney(costOf(it))}
                         </div>
                         <div className="font-semibold tabular-nums">
                           {it.salePrice ? (

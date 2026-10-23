@@ -23,6 +23,7 @@ import { newBatch, commitBatch } from "@/repositories/base";
 import type { Item, ItemKind } from "@/types";
 import { SelectMenu } from "@/components/SelectMenu";
 import { ITEM_KIND_OPTIONS } from "@/lib/production";
+import { averageCostMap, costOf } from "@/lib/finData";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Field } from "@/components/Field";
@@ -97,6 +98,8 @@ function ItemsPage() {
   const editAllowed = isOwner || canEdit("masterData");
   const deleteAllowed = isOwner || canDelete("masterData");
   const [rows, setRows] = useState<Item[]>([]);
+  // Cost is the weighted average; purchasePrice is the last purchase rate.
+  const avgCosts = useRepoMemo(() => averageCostMap());
   const [q, setQ] = useStickyState("items.search", "");
   const [open, setOpen] = useState(false);
   const [edit, setEdit] = useState<Item | null>(null);
@@ -195,9 +198,17 @@ function ItemsPage() {
     },
     { key: "category", label: "Category", width: "140px", render: (r) => r.category ?? "—" },
     {
+      key: "avg",
+      label: "Avg Cost",
+      width: "120px",
+      align: "right",
+      render: (r) => fmtMoney(costOf(avgCosts, r)),
+      sortValue: (r) => costOf(avgCosts, r),
+    },
+    {
       key: "purchase",
-      label: "Purchase Price",
-      width: "130px",
+      label: "Last Purchase",
+      width: "120px",
       align: "right",
       render: (r) => fmtMoney(r.purchasePrice),
     },
@@ -798,7 +809,7 @@ export function ItemDialog({
             onValue={(n) => setF({ ...f, gstRate: Math.max(0, n) })}
           />
           <NumField
-            label="Purchase Price"
+            label="Last Purchase Price"
             value={f.purchasePrice ?? 0}
             onValue={(n) => setF({ ...f, purchasePrice: n })}
           />

@@ -41,6 +41,7 @@ import {
   totalSettlementDiscount,
 } from "@/lib/ledger";
 import { absorbedConversionCost } from "@/lib/production";
+import { averageCostMap, stockValueOf } from "@/lib/finData";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
   AreaChart,
@@ -253,7 +254,11 @@ function Dashboard() {
   const receivableParties = customerBalances.length;
   const payableParties = supplierBalances.length;
 
-  const stockValue = data.items.reduce((a, i) => a + (i.stock || 0) * (i.purchasePrice || 0), 0);
+  // At weighted-average cost — the same figure the balance sheet carries —
+  // not the last purchase rate. `data` is only the trigger to recompute.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const avgCosts = useMemo(() => averageCostMap(), [data]);
+  const stockValue = data.items.reduce((a, i) => a + stockValueOf(avgCosts, i), 0);
   const cashInHand = useMemo(
     () =>
       netFlow(

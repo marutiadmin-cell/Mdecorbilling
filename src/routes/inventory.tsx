@@ -14,7 +14,8 @@ import {
   StockAdjustmentRepo,
   ProductionRepo,
 } from "@/repositories";
-import { useRepoData } from "@/hooks/useRepoData";
+import { useRepoData, useRepoMemo } from "@/hooks/useRepoData";
+import { averageCostMap, stockValueOf } from "@/lib/finData";
 import { useStickyState } from "@/hooks/useStickySearch";
 import type { Item } from "@/types";
 import { fmtMoney } from "@/lib/format";
@@ -28,6 +29,9 @@ function InventoryPage() {
   const searchRef = useRef<HTMLInputElement>(null);
   useAutoFocusOnDesktop(searchRef);
   const [rows, setRows] = useState<Item[]>([]);
+  // Stock is worth its weighted-average cost, not the last purchase rate.
+  const avgCosts = useRepoMemo(() => averageCostMap());
+  const valueOf = (r: Item) => stockValueOf(avgCosts, r);
   const [q, setQ] = useStickyState("inventory.search", "");
   const refresh = () => setRows(ItemRepo.all());
   useEffect(() => {
@@ -136,11 +140,11 @@ function InventoryPage() {
     { key: "min", label: "Min", align: "right", width: "70px", render: (r) => r.minStock ?? "—" },
     {
       key: "value",
-      label: "Stock Value",
+      label: "Value (avg cost)",
       align: "right",
       width: "120px",
-      render: (r) => fmtMoney(r.stock * r.purchasePrice),
-      sortValue: (r) => r.stock * r.purchasePrice,
+      render: (r) => fmtMoney(valueOf(r)),
+      sortValue: (r) => valueOf(r),
     },
   ];
 
@@ -153,7 +157,7 @@ function InventoryPage() {
   });
 
   // Footer totals cover the filtered rows the table actually shows
-  const totalValue = filtered.reduce((s, r) => s + r.stock * r.purchasePrice, 0);
+  const totalValue = filtered.reduce((s, r) => s + valueOf(r), 0);
   const lowCount = filtered.filter(
     (r) => (r.minStock != null && r.stock <= r.minStock) || r.stock < 0,
   ).length;
@@ -215,9 +219,7 @@ function InventoryPage() {
                     <span>+{purchaseQty.get(r.id) ?? 0} in</span>
                     <span>-{salesQty.get(r.id) ?? 0} out</span>
                     <span>Min {r.minStock ?? "—"}</span>
-                    <span className="ml-auto tabular-nums">
-                      {fmtMoney(r.stock * r.purchasePrice)}
-                    </span>
+                    <span className="ml-auto tabular-nums">{fmtMoney(valueOf(r))}</span>
                   </div>
                 </div>
               );

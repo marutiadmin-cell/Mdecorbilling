@@ -15,6 +15,7 @@ import { PaginationBar } from "@/components/Pagination";
 import { usePagination } from "@/hooks/usePagination";
 import { ItemDialog, StockAdjustDialog } from "./items";
 import { usePermissions } from "@/hooks/usePermissions";
+import { averageCostMap, costOf, stockValueOf } from "@/lib/finData";
 import { useRepoData, useRepoMemo } from "@/hooks/useRepoData";
 import type { Item, Invoice, Return } from "@/types";
 import {
@@ -56,6 +57,9 @@ function ItemDetailPage() {
   const [editOpen, setEditOpen] = useState(false);
   const [adjustOpen, setAdjustOpen] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
+  // The item's cost is its weighted average; the last purchase rate is shown
+  // beside it for reference.
+  const avgCosts = useRepoMemo(() => averageCostMap());
 
   useEffect(() => {
     setItem(ItemRepo.get(id) ?? null);
@@ -247,14 +251,15 @@ function ItemDetailPage() {
       </div>
 
       {/* Summary — desktop: one row across all 6, plenty of width to spare */}
-      <div className="hidden lg:grid grid-cols-6 bg-white border-b">
+      <div className="hidden lg:grid grid-cols-7 bg-white border-b">
         <Stat
           label="Current Stock"
           value={`${item.stock} ${item.unit}`}
           color={item.stock < 0 ? "text-rose-600" : "text-gray-800"}
         />
-        <Stat label="Stock Value" value={fmtMoney(r2(item.stock * item.purchasePrice))} />
-        <Stat label="Purchase Price" value={fmtMoney(item.purchasePrice)} />
+        <Stat label="Stock Value (avg)" value={fmtMoney(stockValueOf(avgCosts, item))} />
+        <Stat label="Average Cost" value={fmtMoney(costOf(avgCosts, item))} />
+        <Stat label="Last Purchase" value={fmtMoney(item.purchasePrice)} />
         <Stat label="Sale Price" value={fmtMoney(item.salePrice)} />
         <Stat label="Total Sold" value={`${soldQty} ${item.unit}`} />
         <Stat
@@ -278,10 +283,11 @@ function ItemDetailPage() {
             color={item.stock < 0 ? "text-rose-600" : "text-gray-800"}
           />
           <MobileStatCard
-            label="Stock Value"
-            value={fmtMoney(r2(item.stock * item.purchasePrice))}
+            label="Stock Value (avg)"
+            value={fmtMoney(stockValueOf(avgCosts, item))}
           />
-          <MobileStatCard label="Purchase Price" value={fmtMoney(item.purchasePrice)} />
+          <MobileStatCard label="Average Cost" value={fmtMoney(costOf(avgCosts, item))} />
+          <MobileStatCard label="Last Purchase" value={fmtMoney(item.purchasePrice)} />
           <MobileStatCard label="Sale Price" value={fmtMoney(item.salePrice)} />
           <MobileStatCard label="Total Sold" value={`${soldQty} ${item.unit}`} />
           <MobileStatCard

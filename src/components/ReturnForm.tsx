@@ -15,6 +15,7 @@ import {
 } from "@/repositories";
 import type { Return, ReturnReason, LineItem, Party, Item, Invoice } from "@/types";
 import { fmtMoney, today } from "@/lib/format";
+import { averageCostMap, costOf } from "@/lib/finData";
 import { toast } from "sonner";
 import { useHighlightScroll } from "@/hooks/useHighlightScroll";
 import { Trash2, UserPlus, Save, X, CornerDownLeft, CornerUpLeft, Loader2 } from "lucide-react";
@@ -84,6 +85,9 @@ export function ReturnForm({ mode }: Props) {
   // "existing" document the way the invoice one is.
   const gstLocked = company.gstMode === "gst" || company.gstMode === "non-gst";
   const allParties = useRepoMemo(() => PartyRepo.all());
+  // Weighted-average cost — the cost a returned line carries when it cannot
+  // be traced to the bill it was sold on.
+  const avgCosts = useRepoMemo(() => averageCostMap());
   const items = useRepoMemo(() => ItemRepo.all());
   // After an item is picked, focus goes to THAT line's Qty field (id
   // "qty-<lineId>") so the returned quantity can be typed immediately —
@@ -224,7 +228,13 @@ export function ReturnForm({ mode }: Props) {
    *  its comment) in InvoiceForm.tsx for why this matters: rounding
    *  `taxable * (1 + rate)` in one step can disagree with recalc's own
    *  taxable-then-tax rounding by a stray paisa on some lines. */
-  const lineAmount = (qty: number, price: number, discountPct: number, gstRate: number, gst: boolean) => {
+  const lineAmount = (
+    qty: number,
+    price: number,
+    discountPct: number,
+    gstRate: number,
+    gst: boolean,
+  ) => {
     const taxable = r2(qty * price * (1 - discountPct / 100));
     const tax = gst ? r2(taxable * (gstRate / 100)) : 0;
     return r2(taxable + tax);
@@ -257,7 +267,15 @@ export function ReturnForm({ mode }: Props) {
       discountPct: 0,
       gstRate: it.gstRate,
       amount: 0,
-      costPrice: it.purchasePrice,
+      // Goods coming back from a customer reverse exactly the cost their sale
+      // booked; otherwise (a purchase return, or no matching bill) the
+      // item's weighted-average cost.
+      costPrice:
+        (isSaleReturn
+          ? SalesRepo.all()
+              .find((s) => s.number === ret.originalRef)
+              ?.lineItems.find((l) => l.itemId === it.id)?.costPrice
+          : undefined) ?? Math.round(costOf(avgCosts, it) * 100) / 100,
       hsn: it.hsn || undefined,
     };
     line.amount = lineAmount(line.qty, line.price, line.discountPct, line.gstRate, gstOn);

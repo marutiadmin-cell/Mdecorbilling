@@ -15,6 +15,7 @@ import {
   ProductionRepo,
 } from "@/repositories";
 import { absorbedConversionCost } from "@/lib/production";
+import { averageCostMap, costOf, stockValueOf } from "@/lib/finData";
 import { matchesQuery } from "@/lib/search";
 import { fmtMoney, fmtDate, today } from "@/lib/format";
 import { useFinancialYear } from "@/store/financialYear";
@@ -946,7 +947,10 @@ function ReportView({
   }
 
   if (which === "stock") {
-    const totalValue = items.reduce((a, i) => a + i.stock * i.purchasePrice, 0);
+    // Valued at weighted-average cost (what the balance sheet uses); the last
+    // purchase rate is shown alongside for reference.
+    const avgCosts = averageCostMap();
+    const totalValue = items.reduce((a, i) => a + stockValueOf(avgCosts, i), 0);
     const lowStock = items.filter(
       (i) => (i.minStock != null && i.stock <= i.minStock) || i.stock < 0,
     ).length;
@@ -964,7 +968,8 @@ function ReportView({
           "Stock",
           "Unit",
           "Min Stock",
-          "Purchase Price",
+          "Last Purchase",
+          "Avg Cost",
           "Sale Price",
           "Stock Value",
         ]}
@@ -978,8 +983,9 @@ function ReportView({
             i.unit,
             i.minStock ? String(i.minStock) : "—",
             fmtMoney(i.purchasePrice),
+            fmtMoney(costOf(avgCosts, i)),
             fmtMoney(i.salePrice),
-            fmtMoney(i.stock * i.purchasePrice),
+            fmtMoney(stockValueOf(avgCosts, i)),
           ])}
       />
     );
