@@ -3221,7 +3221,9 @@ async function runAll(): Promise<Results> {
     const itemDlg = Array.from(document.querySelectorAll('[role="dialog"]')).find((d) =>
       /New Item/.test(d.querySelector("h2")?.textContent ?? ""),
     ) as HTMLElement | undefined;
-    const catBox = itemDlg?.querySelector('input[aria-label="Category"]') as HTMLInputElement | null;
+    const catBox = itemDlg?.querySelector(
+      'input[aria-label="Category"]',
+    ) as HTMLInputElement | null;
     assert(!!catBox, "new item category: the add-item dialog asks for a category at all");
 
     await act(async () => {
@@ -6077,9 +6079,8 @@ async function runAll(): Promise<Results> {
       assert(!!legs, "boms: the material item was created");
       assert(legs?.kind === "raw", `boms: as a raw material, got ${legs?.kind}`);
       assert(
-        (
-          currentDialog().querySelector('input[aria-label="Material"]') as HTMLInputElement | null
-        )?.value === "Brass Legs Q7",
+        (currentDialog().querySelector('input[aria-label="Material"]') as HTMLInputElement | null)
+          ?.value === "Brass Legs Q7",
         "boms: and the recipe row now uses it",
       );
       if (legs) ItemRepo.remove(legs.id);
@@ -6170,6 +6171,216 @@ async function runAll(): Promise<Results> {
     has(sofaHistory, fmtMoney(10200), "item page: average cost of the made sofa is 10,200");
     const fabricHistory = await renderRoute("/items/MF-FAB");
     has(fabricHistory, "Consumed", "production: the fabric's history shows it was used");
+  }
+
+  /* ── Made to measure: the client's own Easy Lift costing sheet ──────────
+     The shop could not describe a blind with a fixed BOM — every material
+     follows the window's size. Set up the way they would: tick "Made to
+     measure", start from the venetian ready-made (which picks their items
+     by name), try W 58 × H 35 in, and the screen must show their Excel's
+     numbers: ₹4,087 total, ₹370.61 – ₹518.85 per sq ft. Then a production
+     run of 2 such blinds must move exactly that much stock. */
+  {
+    const B = (id: string, name: string, unit: string, price: number, stock = 100) =>
+      ItemRepo.add({
+        id,
+        name,
+        unit,
+        kind: "raw",
+        purchasePrice: price,
+        salePrice: 0,
+        gstRate: 0,
+        stock,
+        openingStock: stock,
+        createdAt: "2026-01-01T00:00:00Z",
+      } as never);
+    B("MB-BOT", "Bottom rail", "m", 230);
+    B("MB-SLT", "Slat 50mm", "pcs", 54, 1000);
+    B("MB-HR", "Head rail", "ft", 112);
+    B("MB-MEC", "Mechanism", "pcs", 218);
+    B("MB-ATR", "ATR", "pcs", 140);
+    B("MB-CHN", "Chain", "pcs", 50);
+    B("MB-LT", "Ladder tape", "pcs", 30);
+    B("MB-ROD", "Rod", "ft", 18);
+    B("MB-CB", "Ceiling bracket", "pcs", 30);
+    B("MB-DOR", "Dori", "pcs", 3);
+    B("MB-BL", "Bottom lock", "pcs", 10);
+    ItemRepo.add({
+      id: "MB-BLIND",
+      name: "Wooden Blind Easy Lift",
+      unit: "sqft",
+      kind: "finished",
+      purchasePrice: 0,
+      salePrice: 0,
+      gstRate: 0,
+      stock: 0,
+      openingStock: 0,
+      createdAt: "2026-01-01T00:00:00Z",
+    } as never);
+
+    await renderRoute("/boms");
+    await act(async () => {
+      findButton(/New BOM/)?.click();
+    });
+    await settleMs(200);
+    const fin = currentDialog().querySelector(
+      'input[aria-label="Finished item"]',
+    ) as HTMLInputElement | null;
+    await act(async () => {
+      fin?.focus();
+      setInput(fin, "Wooden Blind");
+    });
+    await settleMs(150);
+    const finOpt = Array.from(document.querySelectorAll('[role="option"]')).find(
+      (o) => (o.querySelector("span")?.textContent ?? "") === "Wooden Blind Easy Lift",
+    );
+    await act(async () => {
+      finOpt?.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true }));
+    });
+    await settleMs(120);
+
+    const mtmBox = currentDialog().querySelector(
+      'input[aria-label="Made to measure"]',
+    ) as HTMLInputElement | null;
+    assert(!!mtmBox, "mtm: the BOM offers a Made to measure switch");
+    await act(async () => {
+      mtmBox?.click();
+    });
+    await settleMs(150);
+    const starter = currentDialog().querySelector(
+      'select[aria-label="Start from"]',
+    ) as HTMLSelectElement | null;
+    assert(!!starter, "mtm: ready-made starters are offered");
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")!.set!;
+      setter.call(starter, "venetian");
+      starter!.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    await settleMs(200);
+    const picked = Array.from(currentDialog().querySelectorAll('input[aria-label="Material"]')).map(
+      (i) => (i as HTMLInputElement).value,
+    );
+    assert(
+      picked.includes("Slat 50mm") &&
+        picked.includes("Bottom rail") &&
+        picked.includes("Bottom lock"),
+      `mtm: the starter picks the shop's items by name — ${JSON.stringify(picked)}`,
+    );
+    assert(
+      picked.every((n) => n),
+      `mtm: every row of the starter found its item — ${JSON.stringify(picked)}`,
+    );
+
+    const tryW = currentDialog().querySelector('input[aria-label="Try width"]') as HTMLInputElement;
+    const tryH = currentDialog().querySelector(
+      'input[aria-label="Try height"]',
+    ) as HTMLInputElement;
+    await act(async () => setInput(tryW, "58"));
+    await act(async () => setInput(tryH, "35"));
+    await settleMs(150);
+    const sheetText = currentDialog().textContent ?? "";
+    has(sheetText, fmtMoney(4087), "mtm: W 58 × H 35 costs ₹4,087 — the client's sheet");
+    has(sheetText, fmtMoney(370.61), "mtm: minimum sale ₹370.61 / sq ft");
+    has(sheetText, fmtMoney(518.85), "mtm: maximum sale ₹518.85 / sq ft");
+    has(sheetText, "14.0972 sq ft", "mtm: area 14.0972 sq ft");
+
+    // A misspelt formula is pointed at, and refused on save.
+    const formulas = currentDialog().querySelectorAll('input[aria-label="Quantity formula"]');
+    const slatFormula = formulas[1] as HTMLInputElement;
+    await act(async () => setInput(slatFormula, "CEIL(H / SLAT_PICH)"));
+    await settleMs(120);
+    has(
+      currentDialog().textContent ?? "",
+      "SLAT_PICH",
+      "mtm: the costing sheet names the unknown word",
+    );
+    const nBefore = BomRepo.all().length;
+    await act(async () => {
+      findButton(/^Save BOM$/)?.click();
+    });
+    await settleMs(200);
+    assert(BomRepo.all().length === nBefore, "mtm: a BOM with a broken formula is not saved");
+    await act(async () => setInput(slatFormula, "CEIL(H / SLAT_PITCH)"));
+    await settleMs(100);
+    await act(async () => {
+      findButton(/^Save BOM$/)?.click();
+    });
+    await settleMs(250);
+    const saved = BomRepo.all().find((b) => b.finishedItemId === "MB-BLIND");
+    assert(!!saved?.sizing, "mtm: saved as a made-to-measure BOM");
+    assert(
+      saved?.components.find((c) => c.itemId === "MB-SLT")?.qtyFormula === "CEIL(H / SLAT_PITCH)",
+      "mtm: with its formulas",
+    );
+    const bomList = await renderRoute("/boms");
+    has(bomList, "By size", "mtm: the list says its cost depends on the size");
+
+    // Production: two such blinds.
+    await renderRoute("/productions");
+    await act(async () => {
+      findButton(/New production/)?.click();
+    });
+    await settleMs(200);
+    const bomSel = currentDialog().querySelector(
+      '[role="combobox"][aria-label="BOM"]',
+    ) as HTMLButtonElement | null;
+    await act(async () => {
+      bomSel?.click();
+    });
+    await settleMs(120);
+    const bopt = Array.from(document.querySelectorAll('[role="option"]')).find((o) =>
+      (o.textContent ?? "").includes(saved?.name ?? "§"),
+    );
+    await act(async () => {
+      bopt?.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+    });
+    await settleMs(150);
+    const wBox = currentDialog().querySelector('input[aria-label="Width"]') as HTMLInputElement;
+    assert(!!wBox, "mtm production: a made-to-measure BOM asks for the size");
+    await act(async () => setInput(wBox, "58"));
+    await act(async () =>
+      setInput(
+        currentDialog().querySelector('input[aria-label="Height"]') as HTMLInputElement,
+        "35",
+      ),
+    );
+    await act(async () =>
+      setInput(
+        currentDialog().querySelector('input[aria-label="Pieces"]') as HTMLInputElement,
+        "2",
+      ),
+    );
+    await settleMs(150);
+    const madeBox = currentDialog().querySelector(
+      'input[aria-label="Quantity made"]',
+    ) as HTMLInputElement;
+    assert(
+      Math.abs(Number(madeBox?.value) - 28.19) < 0.011,
+      `mtm production: 2 blinds of 14.10 sq ft make 28.19 sq ft, got ${madeBox?.value}`,
+    );
+    const slatsBefore = ItemRepo.get("MB-SLT")!.stock;
+    await act(async () => {
+      findButton(/^Save production$/)?.click();
+    });
+    await settleMs(300);
+    const run = ProductionRepo.all().find((p) => p.finishedItemId === "MB-BLIND");
+    assert(!!run, "mtm production: saved");
+    assert(
+      run?.size?.w === 58 && run?.size?.pieces === 2,
+      `mtm production: remembers the size it was made at — ${JSON.stringify(run?.size)}`,
+    );
+    assert(
+      ItemRepo.get("MB-SLT")!.stock === slatsBefore - 62,
+      `mtm production: 2 × 31 slats out, got ${slatsBefore} → ${ItemRepo.get("MB-SLT")!.stock}`,
+    );
+    assert(
+      Math.abs(ItemRepo.get("MB-BOT")!.stock - (100 - 2.95)) < 0.011,
+      `mtm production: 2 × 1.4732 m bottom rail out, got ${ItemRepo.get("MB-BOT")!.stock}`,
+    );
+    assert(
+      Math.abs(ItemRepo.get("MB-BLIND")!.stock - 28.19) < 0.011,
+      `mtm production: 28.19 sq ft of blind into stock, got ${ItemRepo.get("MB-BLIND")!.stock}`,
+    );
   }
 
   /* ── The balance sheet over EVERYTHING this suite has seeded ──────────
@@ -6434,7 +6645,8 @@ async function runAll(): Promise<Results> {
     assert(!!partyDlg, "receipt: the full party form opens for the new name");
     for (const field of ["Address line 1", "GSTIN", "Party type"]) {
       has(
-        (partyDlg?.textContent ?? "") + (partyDlg?.querySelector(`[aria-label="${field}"]`) ? field : ""),
+        (partyDlg?.textContent ?? "") +
+          (partyDlg?.querySelector(`[aria-label="${field}"]`) ? field : ""),
         field,
         `receipt: it is the Parties page's form, with "${field}"`,
       );

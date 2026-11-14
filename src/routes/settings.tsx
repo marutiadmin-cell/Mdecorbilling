@@ -49,7 +49,9 @@ import {
   Landmark,
   AlertTriangle,
   Package,
+  Ruler,
 } from "lucide-react";
+import { ManufacturingSettings } from "@/components/ManufacturingSettings";
 
 export const Route = createFileRoute("/settings")({ component: SettingsPage });
 
@@ -176,6 +178,7 @@ function SettingsPage() {
   const companyRef = useRef<HTMLFormElement>(null);
   const categoriesRef = useRef<HTMLDivElement>(null);
   const unitsRef = useRef<HTMLDivElement>(null);
+  const mfgRef = useRef<HTMLDivElement>(null);
   const teamRef = useRef<HTMLDivElement>(null);
   const whatsappRef = useRef<HTMLDivElement>(null);
   const bankRef = useRef<HTMLDivElement>(null);
@@ -186,6 +189,7 @@ function SettingsPage() {
     { key: "company", label: "Company Details", icon: Building2, ref: companyRef },
     { key: "categories", label: "Expense Categories", icon: Receipt, ref: categoriesRef },
     { key: "units", label: "Units", icon: Package, ref: unitsRef },
+    { key: "manufacturing", label: "Manufacturing", icon: Ruler, ref: mfgRef },
     ...(isOwner ? [{ key: "team", label: "Team", icon: Users2, ref: teamRef }] : []),
     ...(isOwner
       ? [{ key: "whatsapp", label: "WhatsApp", icon: MessageCircle, ref: whatsappRef }]
@@ -659,6 +663,24 @@ function SettingsPage() {
                   </Button>
                 </div>
               </div>
+            </div>
+
+            <div
+              ref={mfgRef}
+              className="bg-white border border-gray-100 rounded-lg shadow-sm overflow-hidden scroll-mt-6"
+            >
+              <SectionHeader
+                icon={<Ruler className="h-4 w-4" />}
+                title="Manufacturing"
+                description="Made-to-measure blinds and curtains — the unit orders are measured in, the minimum area charged, formula constants, and the lists a job card offers"
+              />
+              <ManufacturingSettings
+                company={c}
+                onSave={(next) => {
+                  setC(next);
+                  CompanyRepo.save(next);
+                }}
+              />
             </div>
 
             {isOwner && (

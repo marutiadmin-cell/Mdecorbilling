@@ -31,6 +31,8 @@ import {
   stockShortfalls,
 } from "@/lib/production";
 import { averageCostMap, costOf } from "@/lib/finData";
+import { consumptionForSize, madeQty } from "@/lib/sizing";
+import { LENGTH_LABEL, type LengthUnit } from "@/lib/units";
 import type { CostLine, Production, ProductionLine } from "@/types";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -331,10 +333,24 @@ function ProductionsPage() {
                     {fmtMoney(p.totalCost)}
                   </p>
                 </div>
-                <p className="text-[11px] text-gray-400 mt-1 truncate">
-                  {fmtDate(p.date)} · {p.number}
-                  {p.partyName ? ` · for ${p.partyName}` : ""}
-                </p>
+                <div className="flex items-center justify-between gap-2 mt-1">
+                  <p className="text-[11px] text-gray-400 truncate">
+                    {fmtDate(p.date)} · {p.number}
+                    {p.partyName ? ` · for ${p.partyName}` : ""}
+                  </p>
+                  {deleteAllowed && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        remove(p);
+                      }}
+                      className="p-1.5 rounded hover:bg-rose-50 text-gray-300 hover:text-rose-500 transition"
+                      title="Delete production"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  )}
+                </div>
               </div>
             ))}
           </div>
@@ -417,6 +433,14 @@ function ProductionDialog({
   const [lines, setLines] = useState<DraftLine[]>([]);
   const [costs, setCosts] = useState<CostLine[]>([]);
   const [roundUp, setRoundUp] = useState(true);
+  /** Made to measure: the size this run is made at, and how many pieces. */
+  const [size, setSize] = useState<{ w: number; h: number; unit: LengthUnit; pieces: number }>({
+    w: 0,
+    h: 0,
+    unit: "in",
+    pieces: 1,
+  });
+  const mtm = CompanyRepo.get().mtm;
   /** The materials no longer match the BOM × qty — the person changed them. */
   const [touched, setTouched] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -435,15 +459,37 @@ function ProductionDialog({
     setNotes(production?.notes ?? "");
     setLines((production?.components ?? []).map(toDraft));
     setCosts(production?.additionalCosts ?? []);
+    setSize(
+      production?.size ?? { w: 0, h: 0, unit: CompanyRepo.get().mtm?.sizeUnit ?? "in", pieces: 1 },
+    );
     setTouched(!!production);
   }, [open, production]);
 
   const bom = bomId === NO_BOM ? undefined : BomRepo.get(bomId);
-  const fillFromBom = (b = bom, q = qty, round = roundUp) => {
+  const fillFromBom = (b = bom, q = qty, round = roundUp, sz = size) => {
     if (!b) return;
+    if (b.sizing) {
+      // Made to measure: materials follow the size × pieces, and the qty
+      // made is the area (or pieces) the finished item is stocked in.
+      const r = consumptionForSize(b, sz, sz.pieces, byId, {
+        constants: mtm?.constants,
+        roundUpWhole: round,
+      });
+      setLines(r.lines.map(toDraft));
+      setCosts(r.costs);
+      const fin = byId.get(b.finishedItemId);
+      setQty(madeQty(b, sz, sz.pieces, fin?.unit, mtm?.minSqft));
+      setTouched(false);
+      return;
+    }
     setLines(consumptionFor(b, q, byId, round).map(toDraft));
     setCosts(scaledCosts(b, q));
     setTouched(false);
+  };
+  const changeSize = (patch: Partial<typeof size>) => {
+    const next = { ...size, ...patch };
+    setSize(next);
+    if (bom?.sizing && !touched) fillFromBom(bom, qty, roundUp, next);
   };
 
   const finished = byId.get(finishedId);
@@ -491,6 +537,10 @@ function ProductionDialog({
     if (savingRef.current) return;
     if (!finished) {
       toast.error("Choose the finished item made");
+      return;
+    }
+    if (bom?.sizing && !(size.w > 0 && size.h > 0 && size.pieces > 0)) {
+      toast.error("Enter the width, height and pieces this run is made at");
       return;
     }
     if (!(qty > 0)) {
@@ -601,6 +651,7 @@ function ProductionDialog({
       partyName: (party?.name ?? partyName.trim()) || undefined,
       orderRef: orderRef.trim() || undefined,
       notes: notes.trim() || undefined,
+      size: bom?.sizing ? { ...size, pieces: Number(size.pieces) || 0 } : undefined,
       prevFinishedCost,
     };
     if (production) ProductionRepo.updateBatched(batch, production.id, record);
@@ -676,7 +727,8 @@ function ProductionDialog({
                 value={qty}
                 onValue={(n) => {
                   setQty(n);
-                  if (bom && !touched && n > 0) fillFromBom(bom, n, roundUp);
+                  // A made-to-measure run takes its qty from the size, not the other way round.
+                  if (bom && !bom.sizing && !touched && n > 0) fillFromBom(bom, n, roundUp);
                 }}
                 className={inputCls}
                 aria-label="Quantity made"
@@ -690,6 +742,55 @@ function ProductionDialog({
                 onChange={(e) => setDate(e.target.value)}
               />
             </div>
+            {bom?.sizing && (
+              <div className="sm:col-span-6 grid grid-cols-2 sm:grid-cols-6 gap-3 rounded-md border border-primary/30 bg-primary/5 p-2.5">
+                <p className="col-span-2 sm:col-span-6 text-[12px] font-semibold">
+                  Made to measure — the size this run is made at
+                </p>
+                <label className="flex flex-col gap-1 text-[12px]">
+                  <span className="text-muted-foreground font-medium">Width *</span>
+                  <NumInput
+                    value={size.w}
+                    onValue={(n) => changeSize({ w: n })}
+                    className={inputCls}
+                    aria-label="Width"
+                  />
+                </label>
+                <label className="flex flex-col gap-1 text-[12px]">
+                  <span className="text-muted-foreground font-medium">Height *</span>
+                  <NumInput
+                    value={size.h}
+                    onValue={(n) => changeSize({ h: n })}
+                    className={inputCls}
+                    aria-label="Height"
+                  />
+                </label>
+                <label className="flex flex-col gap-1 text-[12px]">
+                  <span className="text-muted-foreground font-medium">Unit</span>
+                  <select
+                    value={size.unit}
+                    onChange={(e) => changeSize({ unit: e.target.value as LengthUnit })}
+                    className={inputCls}
+                    aria-label="Size unit"
+                  >
+                    {(["in", "cm", "mm"] as LengthUnit[]).map((u) => (
+                      <option key={u} value={u}>
+                        {LENGTH_LABEL[u]}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="flex flex-col gap-1 text-[12px]">
+                  <span className="text-muted-foreground font-medium">Pieces *</span>
+                  <NumInput
+                    value={size.pieces}
+                    onValue={(n) => changeSize({ pieces: n })}
+                    className={inputCls}
+                    aria-label="Pieces"
+                  />
+                </label>
+              </div>
+            )}
             <label className="flex flex-col gap-1 text-[12px] sm:col-span-2">
               <span className="text-muted-foreground font-medium">
                 For customer (made to order)

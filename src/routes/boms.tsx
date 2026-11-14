@@ -2,7 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import { PageHeader } from "@/components/PageHeader";
 import { DataTable, type Column } from "@/components/DataTable";
-import { BomRepo, ItemRepo, ProductionRepo } from "@/repositories";
+import { BomRepo, CompanyRepo, ItemRepo, ProductionRepo } from "@/repositories";
 import { genId, newBatch, commitBatch } from "@/repositories/base";
 import { useRepoData, useRepoMemo } from "@/hooks/useRepoData";
 import { useStickyState } from "@/hooks/useStickySearch";
@@ -12,7 +12,17 @@ import { matchesQuery } from "@/lib/search";
 import { fmtMoney } from "@/lib/format";
 import { bomCycle, bomUnitCost, MAX_BOM_COMPONENTS } from "@/lib/production";
 import { averageCostMap, costOf } from "@/lib/finData";
-import type { Bom, BomComponent, CostLine, Item } from "@/types";
+import type { Bom, BomSizing, CostLine, Item } from "@/types";
+import {
+  SizingSettings,
+  SizedMaterialRows,
+  AmountOrFormula,
+  starterRows,
+  type DraftComponent,
+} from "@/components/BomSizing";
+import { SizeCalculator } from "@/components/SizeCalculator";
+import { tryEvaluate } from "@/lib/formula";
+import { bomVars } from "@/lib/sizing";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Field } from "@/components/Field";
@@ -77,7 +87,8 @@ function BomsPage() {
   );
   void _repoV;
 
-  const costOf = (b: Bom) => bomUnitCost(b, byId);
+  // A made-to-measure BOM has no one cost — it depends on the size.
+  const costOf = (b: Bom) => (b.sizing ? NaN : bomUnitCost(b, byId));
   const saleOf = (b: Bom) => byId.get(b.finishedItemId)?.salePrice ?? 0;
 
   const remove = (b: Bom) => {
@@ -120,8 +131,9 @@ function BomsPage() {
       label: "Cost / unit",
       width: "120px",
       align: "right",
-      render: (b) => fmtMoney(costOf(b)),
-      sortValue: (b) => costOf(b),
+      render: (b) =>
+        b.sizing ? <span className="text-primary font-medium">By size</span> : fmtMoney(costOf(b)),
+      sortValue: (b) => (b.sizing ? -1 : costOf(b)),
     },
     {
       key: "margin",
@@ -130,6 +142,10 @@ function BomsPage() {
       align: "right",
       render: (b) => {
         const sale = saleOf(b);
+        if (b.sizing) {
+          const pr = b.sizing.pricing;
+          return pr ? `+${pr.minMarginPct ?? 0}% – ${pr.maxMarginPct ?? 0}%` : "—";
+        }
         if (!sale) return "—";
         const m = ((sale - costOf(b)) / sale) * 100;
         return (
@@ -236,13 +252,28 @@ function BomsPage() {
                 <div className="flex items-center justify-between gap-2">
                   <p className="font-semibold text-[13px] truncate">{b.name}</p>
                   <p className="text-[13px] font-bold tabular-nums shrink-0">
-                    {fmtMoney(costOf(b))}
+                    {b.sizing ? <span className="text-primary">By size</span> : fmtMoney(costOf(b))}
                   </p>
                 </div>
-                <p className="text-[11px] text-gray-400 mt-1 truncate">
-                  Makes {b.outputQty} × {byId.get(b.finishedItemId)?.name ?? b.finishedItemName} ·{" "}
-                  {b.components.length} materials
-                </p>
+                <div className="flex items-center justify-between gap-2 mt-1">
+                  <p className="text-[11px] text-gray-400 truncate">
+                    {b.sizing ? "Made to measure" : `Makes ${b.outputQty}`} ×{" "}
+                    {byId.get(b.finishedItemId)?.name ?? b.finishedItemName} · {b.components.length}{" "}
+                    materials
+                  </p>
+                  {deleteAllowed && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        remove(b);
+                      }}
+                      className="p-1.5 rounded hover:bg-rose-50 text-gray-300 hover:text-rose-500 transition"
+                      title="Delete BOM"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  )}
+                </div>
               </div>
             ))}
           </div>
@@ -291,8 +322,6 @@ function EmptyBoms() {
   );
 }
 
-type DraftComponent = BomComponent & { key: string };
-
 const blankComponent = (): DraftComponent => ({
   key: genId(),
   itemId: "",
@@ -320,7 +349,11 @@ function BomDialog({
   const [costs, setCosts] = useState<CostLine[]>([]);
   const [notes, setNotes] = useState("");
   const [archived, setArchived] = useState(false);
+  /** Made to measure: present = quantities are formulas of the size. */
+  const [sizing, setSizing] = useState<BomSizing | undefined>(undefined);
   const savingRef = useRef(false);
+  const mtm = CompanyRepo.get().mtm;
+  const constants = mtm?.constants ?? [];
 
   useEffect(() => {
     if (!open) return;
@@ -338,6 +371,7 @@ function BomDialog({
     );
     setNotes(bom?.notes ?? "");
     setArchived(!!bom?.archived);
+    setSizing(bom?.sizing);
   }, [open, bom]);
 
   const avgCosts = useRepoMemo(() => averageCostMap());
@@ -352,20 +386,33 @@ function BomDialog({
     .filter((i) => i.id !== finishedId)
     .sort((a, b) => Number(b.kind === "raw") - Number(a.kind === "raw"));
 
-  const live = components.filter((c) => c.itemId && c.qty > 0);
+  const live = components.filter((c) => c.itemId && (sizing ? !!c.qtyFormula?.trim() : c.qty > 0));
   const draft: Bom = {
     id: bom?.id ?? "",
     name: name.trim(),
     finishedItemId: finishedId,
     finishedItemName: finished?.name ?? "",
-    outputQty: outputQty > 0 ? outputQty : 1,
-    components: live.map(({ key: _k, ...c }) => {
+    // A made-to-measure recipe is always for ONE piece of the given size.
+    outputQty: sizing ? 1 : outputQty > 0 ? outputQty : 1,
+    components: live.map(({ key: _k, hint: _h, ...c }) => {
       void _k;
-      return { ...c, itemName: byId.get(c.itemId)?.name ?? c.itemName };
+      void _h;
+      const base = { ...c, itemName: byId.get(c.itemId)?.name ?? c.itemName };
+      if (sizing) return { ...base, qty: 0, qtyFormula: c.qtyFormula!.trim() };
+      // A fixed BOM keeps no formula fields.
+      const { qtyFormula: _f, resultUnit: _u, ...fixed } = base;
+      void _f;
+      void _u;
+      return fixed;
     }),
     additionalCosts: costs
-      .map((c) => ({ label: c.label.trim(), amount: r2(c.amount || 0) }))
-      .filter((c) => c.label && c.amount),
+      .map((c) => ({
+        label: c.label.trim(),
+        amount: r2(c.amount || 0),
+        ...(sizing && c.formula?.trim() ? { formula: c.formula.trim() } : {}),
+      }))
+      .filter((c) => c.label && (c.amount || ("formula" in c && c.formula))),
+    sizing,
     createdAt: bom?.createdAt ?? "",
   };
   const unitCost = bomUnitCost(draft, byId);
@@ -397,6 +444,41 @@ function BomDialog({
     if (!draft.components.length) {
       toast.error("Add at least one material with a quantity");
       return;
+    }
+    if (sizing) {
+      if (components.some((c) => c.itemId && !c.qtyFormula?.trim())) {
+        toast.error(
+          "Give every material a quantity — a number like 2, or a formula like CEIL(H / 1.13)",
+        );
+        return;
+      }
+      if (components.some((c) => !c.itemId && c.qtyFormula?.trim())) {
+        toast.error("A material row has a formula but no item — pick the item for it");
+        return;
+      }
+      const keys = (sizing.inputs ?? []).map((i) => i.key.trim());
+      if (keys.some((k) => !/^[A-Z_][A-Z0-9_]*$/.test(k))) {
+        toast.error("Every input needs a NAME made of letters, digits and _ (e.g. FULLNESS)");
+        return;
+      }
+      // Work every formula out on a sample size, so a misspelt name is
+      // caught here — not at the counter, in front of a customer.
+      const vars = bomVars(draft, { w: 48, h: 48, unit: sizing.formulaUnit }, constants, {}, 1);
+      for (const c of draft.components) {
+        const r = tryEvaluate(c.qtyFormula ?? "", vars);
+        if (r.error) {
+          toast.error(`${c.itemName}: ${r.error}`, { duration: 9000 });
+          return;
+        }
+      }
+      for (const c of draft.additionalCosts) {
+        if (!c.formula) continue;
+        const r = tryEvaluate(c.formula, vars);
+        if (r.error) {
+          toast.error(`${c.label}: ${r.error}`, { duration: 9000 });
+          return;
+        }
+      }
     }
     if (components.some((c) => !c.itemId && c.qty > 0)) {
       toast.error("A material row has a quantity but no item — pick it from the list");
@@ -469,10 +551,19 @@ function BomDialog({
                 className={inputCls}
               />
             </label>
-            <label className="flex flex-col gap-1 text-[12px]">
-              <span className="text-muted-foreground font-medium">Makes (qty)</span>
-              <NumInput value={outputQty} onValue={setOutputQty} className={inputCls} />
-            </label>
+            {sizing ? (
+              <div className="flex flex-col gap-1 text-[12px]">
+                <span className="text-muted-foreground font-medium">Makes</span>
+                <span className="h-9 sm:h-8 flex items-center text-[12.5px]">
+                  1 piece, any size
+                </span>
+              </div>
+            ) : (
+              <label className="flex flex-col gap-1 text-[12px]">
+                <span className="text-muted-foreground font-medium">Makes (qty)</span>
+                <NumInput value={outputQty} onValue={setOutputQty} className={inputCls} />
+              </label>
+            )}
             <div className="sm:col-span-2">
               <Field
                 label="BOM name"
@@ -483,73 +574,127 @@ function BomDialog({
             </div>
           </div>
 
+          <label className="flex items-center gap-2 text-[12.5px] cursor-pointer self-start">
+            <input
+              type="checkbox"
+              checked={!!sizing}
+              onChange={(e) =>
+                setSizing(
+                  e.target.checked
+                    ? (bom?.sizing ?? {
+                        formulaUnit: mtm?.sizeUnit ?? "in",
+                        pricing: { basis: "sqft", minMarginPct: 10, maxMarginPct: 50 },
+                      })
+                    : undefined,
+                )
+              }
+              aria-label="Made to measure"
+            />
+            <span>
+              <b>Made to measure</b>{" "}
+              <span className="text-muted-foreground">
+                — blinds, curtains: materials worked out from each order's width × height
+              </span>
+            </span>
+          </label>
+          {sizing && (
+            <SizingSettings
+              sizing={sizing}
+              onChange={setSizing}
+              inputCls={inputCls}
+              onStarter={(st) => {
+                setSizing(st.sizing);
+                setComponents(starterRows(st, items));
+                setCosts(st.costs);
+                if (!name.trim()) setName(st.label);
+              }}
+            />
+          )}
+
           <div>
             <p className="text-[12px] font-semibold text-foreground mb-1.5">
-              Materials for {outputQty > 0 ? outputQty : 1} unit{outputQty === 1 ? "" : "s"}
+              {sizing
+                ? "Materials for ONE piece — quantities follow its size"
+                : `Materials for ${outputQty > 0 ? outputQty : 1} unit${outputQty === 1 ? "" : "s"}`}
             </p>
             <div className="border rounded-md overflow-hidden">
-              <div className="hidden sm:grid grid-cols-[minmax(0,1fr)_110px_70px_90px_110px_36px] gap-2 px-2 py-1.5 bg-muted text-[11px] font-semibold text-muted-foreground">
-                <span>Material</span>
-                <span className="text-right">Qty</span>
-                <span>Unit</span>
-                <span className="text-right">Wastage %</span>
-                <span className="text-right">Cost</span>
-                <span />
-              </div>
-              {components.map((c) => {
-                const it = byId.get(c.itemId);
-                const lineCost = r2(
-                  (c.qty || 0) * (1 + (c.wastagePct ?? 0) / 100) * (it?.purchasePrice ?? 0),
-                );
-                return (
-                  <div
-                    key={c.key}
-                    className="grid grid-cols-[minmax(0,1fr)_90px] sm:grid-cols-[minmax(0,1fr)_110px_70px_90px_110px_36px] gap-2 px-2 py-1.5 border-t items-center"
-                  >
-                    <ItemPicker
-                      value={c.itemId}
-                      items={materialChoices}
-                      onChange={(item) =>
-                        patchComponent(c.key, {
-                          itemId: item.id,
-                          itemName: item.name,
-                          unit: item.unit,
-                        })
-                      }
-                      ariaLabel="Material"
-                      allowAdd
-                      newItemKind="raw"
-                      className={inputCls}
-                    />
-                    <NumInput
-                      value={c.qty}
-                      onValue={(n) => patchComponent(c.key, { qty: n })}
-                      className={`${inputCls} text-right`}
-                      aria-label="Material quantity"
-                    />
-                    <span className="hidden sm:block text-[12px] text-muted-foreground truncate">
-                      {it?.unit ?? c.unit}
-                    </span>
-                    <NumInput
-                      value={c.wastagePct ?? 0}
-                      onValue={(n) => patchComponent(c.key, { wastagePct: Math.min(100, n) })}
-                      className={`${inputCls} text-right hidden sm:block`}
-                      aria-label="Wastage percent"
-                    />
-                    <span className="hidden sm:block text-right text-[12px] tabular-nums">
-                      {fmtMoney(lineCost)}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => setComponents((list) => list.filter((x) => x.key !== c.key))}
-                      className="hidden sm:inline-flex h-7 w-7 items-center justify-center rounded text-gray-400 hover:text-rose-600 hover:bg-rose-50"
-                      title="Remove material"
-                    >
-                      <X className="h-3.5 w-3.5" />
-                    </button>
+              {sizing ? (
+                <SizedMaterialRows
+                  components={components}
+                  patch={patchComponent}
+                  remove={(key) => setComponents((list) => list.filter((x) => x.key !== key))}
+                  materialChoices={materialChoices}
+                  itemsById={byId}
+                  inputCls={inputCls}
+                />
+              ) : (
+                <>
+                  <div className="hidden sm:grid grid-cols-[minmax(0,1fr)_110px_70px_90px_110px_36px] gap-2 px-2 py-1.5 bg-muted text-[11px] font-semibold text-muted-foreground">
+                    <span>Material</span>
+                    <span className="text-right">Qty</span>
+                    <span>Unit</span>
+                    <span className="text-right">Wastage %</span>
+                    <span className="text-right">Cost</span>
+                    <span />
                   </div>
-                );
-              })}
+                  {components.map((c) => {
+                    const it = byId.get(c.itemId);
+                    const lineCost = r2(
+                      (c.qty || 0) * (1 + (c.wastagePct ?? 0) / 100) * (it?.purchasePrice ?? 0),
+                    );
+                    return (
+                      <div
+                        key={c.key}
+                        className="grid grid-cols-[minmax(0,1fr)_90px] sm:grid-cols-[minmax(0,1fr)_110px_70px_90px_110px_36px] gap-2 px-2 py-1.5 border-t items-center"
+                      >
+                        <ItemPicker
+                          value={c.itemId}
+                          items={materialChoices}
+                          onChange={(item) =>
+                            patchComponent(c.key, {
+                              itemId: item.id,
+                              itemName: item.name,
+                              unit: item.unit,
+                            })
+                          }
+                          ariaLabel="Material"
+                          allowAdd
+                          newItemKind="raw"
+                          className={inputCls}
+                        />
+                        <NumInput
+                          value={c.qty}
+                          onValue={(n) => patchComponent(c.key, { qty: n })}
+                          className={`${inputCls} text-right`}
+                          aria-label="Material quantity"
+                        />
+                        <span className="hidden sm:block text-[12px] text-muted-foreground truncate">
+                          {it?.unit ?? c.unit}
+                        </span>
+                        <NumInput
+                          value={c.wastagePct ?? 0}
+                          onValue={(n) => patchComponent(c.key, { wastagePct: Math.min(100, n) })}
+                          className={`${inputCls} text-right hidden sm:block`}
+                          aria-label="Wastage percent"
+                        />
+                        <span className="hidden sm:block text-right text-[12px] tabular-nums">
+                          {fmtMoney(lineCost)}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setComponents((list) => list.filter((x) => x.key !== c.key))
+                          }
+                          className="hidden sm:inline-flex h-7 w-7 items-center justify-center rounded text-gray-400 hover:text-rose-600 hover:bg-rose-50"
+                          title="Remove material"
+                        >
+                          <X className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    );
+                  })}
+                </>
+              )}
             </div>
             <Button
               type="button"
@@ -571,7 +716,7 @@ function BomDialog({
               {costs.map((c, i) => (
                 <div
                   key={i}
-                  className="grid grid-cols-[minmax(0,1fr)_120px_36px] gap-2 items-center"
+                  className={`grid ${sizing ? "grid-cols-[minmax(0,1fr)_170px_36px]" : "grid-cols-[minmax(0,1fr)_120px_36px]"} gap-2 items-center`}
                 >
                   <ComboInput
                     value={c.label}
@@ -583,14 +728,22 @@ function BomDialog({
                     placeholder="e.g. Karigar labour"
                     className={inputCls}
                   />
-                  <NumInput
-                    value={c.amount}
-                    onValue={(n) =>
-                      setCosts((list) => list.map((x, j) => (j === i ? { ...x, amount: n } : x)))
-                    }
-                    className={`${inputCls} text-right`}
-                    aria-label="Cost amount"
-                  />
+                  {sizing ? (
+                    <AmountOrFormula
+                      line={c}
+                      onChange={(l) => setCosts((list) => list.map((x, j) => (j === i ? l : x)))}
+                      inputCls={inputCls}
+                    />
+                  ) : (
+                    <NumInput
+                      value={c.amount}
+                      onValue={(n) =>
+                        setCosts((list) => list.map((x, j) => (j === i ? { ...x, amount: n } : x)))
+                      }
+                      className={`${inputCls} text-right`}
+                      aria-label="Cost amount"
+                    />
+                  )}
                   <button
                     type="button"
                     onClick={() => setCosts((list) => list.filter((_, j) => j !== i))}
@@ -616,22 +769,33 @@ function BomDialog({
           <Field label="Notes" value={notes} onChange={(e) => setNotes(e.target.value)} />
 
           {/* Estimate — at today's material prices, per finished unit */}
-          <div className="rounded-md border bg-muted/40 p-3 grid grid-cols-2 sm:grid-cols-4 gap-3 text-[12px]">
-            <Stat label="Materials / unit" value={fmtMoney(materialPerUnit)} />
-            <Stat
-              label="Labour & overhead / unit"
-              value={fmtMoney(r2(unitCost - materialPerUnit))}
+          {sizing ? (
+            <SizeCalculator
+              bom={draft}
+              itemsById={byId}
+              rateOf={(i) => i.purchasePrice}
+              constants={constants}
+              minSqft={mtm?.minSqft}
+              defaultUnit={mtm?.sizeUnit ?? "in"}
             />
-            <Stat label="Cost / unit" value={fmtMoney(unitCost)} strong />
-            <Stat
-              label="Sale price · margin"
-              value={
-                sale
-                  ? `${fmtMoney(sale)} · ${(((sale - unitCost) / sale) * 100).toFixed(1)}%`
-                  : "Set a sale price on the item"
-              }
-            />
-          </div>
+          ) : (
+            <div className="rounded-md border bg-muted/40 p-3 grid grid-cols-2 sm:grid-cols-4 gap-3 text-[12px]">
+              <Stat label="Materials / unit" value={fmtMoney(materialPerUnit)} />
+              <Stat
+                label="Labour & overhead / unit"
+                value={fmtMoney(r2(unitCost - materialPerUnit))}
+              />
+              <Stat label="Cost / unit" value={fmtMoney(unitCost)} strong />
+              <Stat
+                label="Sale price · margin"
+                value={
+                  sale
+                    ? `${fmtMoney(sale)} · ${(((sale - unitCost) / sale) * 100).toFixed(1)}%`
+                    : "Set a sale price on the item"
+                }
+              />
+            </div>
+          )}
 
           <div className="flex items-center justify-between gap-2">
             {bom ? (

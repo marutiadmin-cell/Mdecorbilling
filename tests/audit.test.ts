@@ -64,6 +64,7 @@ import {
 } from "@/lib/paymentSplit";
 import { readFileSync } from "node:fs";
 import { runFinancialsAudit } from "./financials.audit";
+import { runSizingAudit } from "./sizing.audit";
 import { ledgerColumns } from "@/lib/ledger";
 import {
   classifySendFailure,
@@ -4431,6 +4432,9 @@ console.log(`\n═════════════════════�
 
 /* ═══════ TEST FS: the financial statements (see tests/financials.audit.ts) ═══ */
 runFinancialsAudit(assert);
+
+/* ═══════ TEST SZ: made-to-measure formulas & the client costing sheet (tests/sizing.audit.ts) ═══ */
+runSizingAudit(assert);
 
 console.log(`  AUDIT RESULT: ${passed} assertions passed, ${failed} failed`);
 if (fails.length) {

@@ -1,5 +1,6 @@
 import type { GstType } from "@/lib/gstin";
 import type { EstimateKind, EstimateStatus } from "@/lib/estimates";
+import type { LengthUnit } from "@/lib/units";
 
 export type ID = string;
 
@@ -142,6 +143,9 @@ export type ItemKind = "trading" | "raw" | "finished";
 export interface CostLine {
   label: string;
   amount: number;
+  /** Size-based BOMs only: work the amount out from the size instead
+   *  ("SQFT * 25" — stitching by the square foot). Absent = `amount`. */
+  formula?: string;
 }
 
 /** One material a BOM uses, per `Bom.outputQty` finished units. */
@@ -153,6 +157,40 @@ export interface BomComponent {
   qty: number;
   /** Extra consumed beyond `qty` for cutting/stitching loss, as a percent. */
   wastagePct?: number;
+  /** Size-based BOMs only (see Bom.sizing): how much ONE finished piece
+   *  takes, as a formula of its size — lib/formula.ts. Absent = fixed `qty`. */
+  qtyFormula?: string;
+  /** The unit that formula answers in ("ft", "m", "in", "pcs"…). A length
+   *  converts to the item's own unit (lib/units.ts). Absent = the item's. */
+  resultUnit?: string;
+}
+
+/** How one size-based BOM sells — the costing sheet's bottom half. */
+export interface BomPricing {
+  /** Rate per square foot (blinds) or per piece (a sofa by seats). */
+  basis: "sqft" | "piece";
+  /** Least area charged for one piece; overrides Settings. */
+  minSqft?: number;
+  /** Added to the cost per sq ft (or per piece) before margins — the
+   *  sheet's "MAINTENANCE". */
+  addPerUnit?: number;
+  /** Minimum and maximum selling margin over that, in percent. */
+  minMarginPct?: number;
+  maxMarginPct?: number;
+  /** Round each material line like the costing sheet does. */
+  roundLines?: "none" | "nearest" | "up";
+}
+
+/**
+ * A made-to-measure BOM: the recipe for ONE piece of any size. Present only
+ * on size-based BOMs; a fixed BOM (a sofa model) has none and is untouched.
+ */
+export interface BomSizing {
+  /** The unit W and H are in, inside this BOM's formulas. */
+  formulaUnit: LengthUnit;
+  /** Extra numbers the formulas use, with defaults (FULLNESS, SEATS…). */
+  inputs?: { key: string; label: string; default: number }[];
+  pricing?: BomPricing;
 }
 
 /**
@@ -174,6 +212,8 @@ export interface Bom {
   notes?: string;
   /** Hidden from new productions; kept so old productions still name it. */
   archived?: boolean;
+  /** Made to measure: quantities are formulas of the size, for ONE piece. */
+  sizing?: BomSizing;
   createdAt: string;
 }
 
@@ -220,6 +260,8 @@ export interface Production {
   partyName?: string;
   orderRef?: string;
   notes?: string;
+  /** Made to measure: the size it was made at, and how many pieces. */
+  size?: { w: number; h: number; unit: LengthUnit; pieces: number };
   /** The finished item's purchasePrice just before this run replaced it —
    *  put back on delete, but only while this run is still the item's latest
    *  production and nothing has changed the price since. */
@@ -790,6 +832,27 @@ export interface Company {
    *  can spell a different way each time ("Kg"/"KG"/"kgs" would otherwise
    *  split one unit into three in every stock/report screen). */
   units?: string[];
+  /** Made-to-measure settings (Settings → Manufacturing). */
+  mtm?: MtmSettings;
+}
+
+/** Settings → Manufacturing: what made-to-measure work needs once per shop. */
+export interface MtmSettings {
+  /** The unit a new order is measured in (each order can still change it). */
+  sizeUnit?: LengthUnit;
+  /** Least area charged for one piece, unless a BOM says otherwise. */
+  minSqft?: number;
+  /** Named numbers every size formula can use (SLAT_PITCH = 1.13). */
+  constants?: { key: string; value: number; note?: string }[];
+  /** "Easy Lift (Single Dori / Chain System)", "Roller", "Zebra"… */
+  productTypes?: string[];
+  /** "Left", "Right", "Centre". */
+  operateSides?: string[];
+  /** Job card stages in order, and the one that means "made". */
+  jobStages?: string[];
+  completeStage?: string;
+  /** Job card number prefix ("WB-"). */
+  jobPrefix?: string;
 }
 
 /** Matches the Sidebar's own groupings — permissions are granted per group,
