@@ -15,7 +15,8 @@ import {
   ProductionRepo,
 } from "@/repositories";
 import { absorbedConversionCost } from "@/lib/production";
-import { averageCostMap, costOf, stockValueOf } from "@/lib/finData";
+import { averageCostMap, costOf, saleCostMap, stockValueOf } from "@/lib/finData";
+import { cogsOf } from "@/lib/stockValuation";
 import { matchesQuery } from "@/lib/search";
 import { fmtMoney, fmtDate, today } from "@/lib/format";
 import { useFinancialYear } from "@/store/financialYear";
@@ -24,7 +25,6 @@ import { printOrEscapeStandalone } from "@/lib/print";
 import { useAutoPrintFromUrl } from "@/hooks/useAutoPrintFromUrl";
 import { useRepoData, useRepoMemo } from "@/hooks/useRepoData";
 import {
-  computeCogs,
   buildPartyStatement,
   valueExTax,
   returnValueExTax,
@@ -455,7 +455,10 @@ function ReportView({
     const netRevenue = r2(revenue - saleReturnTotal);
     // Stock-based COGS: cost of items actually sold (net of returned goods),
     // not total purchases — unsold stock does not reduce profit.
-    const cogs = computeCogs(sales, saleReturns, items);
+    // Each line at what it really cost — the weighted average at the moment
+    // it moved, live from the books — so editing or deleting a purchase
+    // re-costs the sales after it. (Not the cost frozen on the bill.)
+    const cogs = cogsOf(sales, saleReturns, saleCostMap());
     const netPurchases = r2(valueExTax(purchases) - returnValueExTax(purchaseReturns));
     const grossProfit = r2(netRevenue - cogs);
     // A Journal Voucher expense leg (Dr increases the expense recognized,

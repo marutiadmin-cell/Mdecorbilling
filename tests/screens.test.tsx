@@ -58,6 +58,9 @@ import {
   CashAdjustmentRepo,
   BomRepo,
   ProductionRepo,
+  BsAccountRepo,
+  FinConfigRepo,
+  JournalVoucherRepo,
 } from "@/repositories";
 
 export interface Results {
@@ -6163,6 +6166,58 @@ async function runAll(): Promise<Results> {
     );
     const setup = await renderRoute("/balance-sheet-setup");
     has(setup, "Expense categories", "setup: lists the expense categories");
+
+    /* Renaming a register account carries everything that names it: its
+       journal voucher lines (or they fall into Suspense) and any expense
+       category posted to it. Driven through the real dialog. */
+    BsAccountRepo.add({ id: "BSA-LOAN", name: "Old Loan", group: "securedLoan" } as never);
+    FinConfigRepo.add({ id: "config", expenseClass: { Rent: "account:Old Loan" } } as never);
+    JournalVoucherRepo.add({
+      id: "JV-LOAN",
+      number: "JV-LOAN",
+      date: D3,
+      narration: "Loan received",
+      lines: [
+        { id: "a", kind: "cash", refName: "Cash", debit: 5000, credit: 0 },
+        { id: "b", kind: "ledger", refId: "Old Loan", refName: "Old Loan", debit: 0, credit: 5000 },
+      ],
+    } as never);
+    await renderRoute("/balance-sheet-setup");
+    const loanRow = Array.from(document.querySelectorAll("tr")).find((r) =>
+      (r.textContent ?? "").includes("Old Loan"),
+    );
+    await act(async () => {
+      (loanRow?.querySelector('button[title="Edit"]') as HTMLButtonElement | null)?.click();
+    });
+    await settleMs(150);
+    await act(async () => {
+      setInput(
+        currentDialog().querySelector('input[aria-label="Account name"]') as HTMLInputElement,
+        "HDFC Car Loan",
+      );
+    });
+    await act(async () => {
+      Array.from(currentDialog().querySelectorAll("button"))
+        .find((b) => b.textContent?.trim() === "Save")
+        ?.click();
+    });
+    await settleMs(300);
+    const jvLine = JournalVoucherRepo.get("JV-LOAN")?.lines.find((l) => l.kind === "ledger");
+    assert(
+      BsAccountRepo.get("BSA-LOAN")?.name === "HDFC Car Loan",
+      "rename: the register account is renamed",
+    );
+    assert(
+      jvLine?.refName === "HDFC Car Loan",
+      `rename: its JV line follows, got ${jvLine?.refName}`,
+    );
+    assert(
+      FinConfigRepo.get("config")?.expenseClass?.Rent === "account:HDFC Car Loan",
+      `rename: the expense mapping follows, got ${FinConfigRepo.get("config")?.expenseClass?.Rent}`,
+    );
+    const after = await renderRoute("/financials");
+    has(after, "Balanced — both sides agree.", "rename: the balance sheet still balances");
+    has(after, "HDFC Car Loan", "rename: the loan shows under its new name");
   }
 
   if (root) root.unmount();

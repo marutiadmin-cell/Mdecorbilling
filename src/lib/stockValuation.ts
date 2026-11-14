@@ -108,7 +108,14 @@ export function purchaseLineRates(inv: Invoice): Map<number, number> {
  * Stock position (qty and value per item) at the end of each requested date,
  * from one pass. Pass dates as YYYY-MM-DD; "" is not allowed.
  */
-export function stockSnapshots(data: StockData, dates: string[]): StockSnapshot[] {
+export function stockSnapshots(
+  data: StockData,
+  dates: string[],
+  /** When given, receives the cost (rupees) of every sale line and every
+   *  physical sale-return line, keyed by lineCostKey — what that line cost
+   *  the shop at the moment it moved. */
+  lineCosts?: Map<string, number>,
+): StockSnapshot[] {
   const items = new Map(data.items.map((i) => [i.id, i] as const));
   const events: Event[] = [];
   /** First known inward rate per item — the fallback for an opening stock
@@ -129,10 +136,11 @@ export function stockSnapshots(data: StockData, dates: string[]): StockSnapshot[
     }
     s.set(id, p);
   };
-  const inAtAverage = (s: Map<string, Pos>, id: string, qty: number) => {
+  const inAtAverage = (s: Map<string, Pos>, id: string, qty: number): number => {
     const p = s.get(id) ?? { qty: 0, value: 0, rate: 0 };
     const rate = p.rate || num(items.get(id)?.purchasePrice);
     inAt(s, id, qty, rate);
+    return qty * rate;
   };
   const out = (s: Map<string, Pos>, id: string, qty: number): number => {
     const p = s.get(id) ?? { qty: 0, value: 0, rate: num(items.get(id)?.purchasePrice) };
@@ -161,16 +169,19 @@ export function stockSnapshots(data: StockData, dates: string[]): StockSnapshot[
   }
   for (const r of data.saleReturns) {
     if (r.isAdjustmentOnly) continue;
-    for (const l of r.lineItems) {
+    r.lineItems.forEach((l, idx) => {
       const q = num(l.qty);
-      if (!q || !l.itemId) continue;
+      if (!q || !l.itemId) return;
       events.push({
         date: r.date,
         created: r.createdAt ?? "",
         rank: RANK.saleReturn,
-        apply: (s) => inAtAverage(s, l.itemId, q),
+        apply: (s) => {
+          const cost = inAtAverage(s, l.itemId, q);
+          lineCosts?.set(lineCostKey("saleReturn", r.id, idx), cost);
+        },
       });
-    }
+    });
   }
   for (const r of data.purchaseReturns) {
     if (r.isAdjustmentOnly) continue;
@@ -186,16 +197,19 @@ export function stockSnapshots(data: StockData, dates: string[]): StockSnapshot[
     }
   }
   for (const inv of data.sales) {
-    for (const l of inv.lineItems) {
+    inv.lineItems.forEach((l, idx) => {
       const q = num(l.qty);
-      if (!q || !l.itemId) continue;
+      if (!q || !l.itemId) return;
       events.push({
         date: inv.date,
         created: inv.createdAt ?? "",
         rank: RANK.sale,
-        apply: (s) => void out(s, l.itemId, q),
+        apply: (s) => {
+          const cost = out(s, l.itemId, q);
+          lineCosts?.set(lineCostKey("sale", inv.id, idx), cost);
+        },
       });
-    }
+    });
   }
   for (const a of data.stockAdjustments) {
     const q = num(a.qty);
@@ -252,11 +266,13 @@ export function stockSnapshots(data: StockData, dates: string[]): StockSnapshot[
   }
 
   const wanted = [...dates].map((d, i) => ({ d, i })).sort((a, b) => a.d.localeCompare(b.d));
+  if (lineCosts && !wanted.some((w) => w.d >= "9999-12-31"))
+    wanted.push({ d: "9999-12-31", i: -1 });
   const results: StockSnapshot[] = new Array(dates.length);
   let e = 0;
   for (const { d, i } of wanted) {
     while (e < events.length && events[e].date <= d) events[e++].apply(state);
-    results[i] = snapshot(d, state, items);
+    if (i >= 0) results[i] = snapshot(d, state, items);
   }
   return results;
 }
@@ -295,4 +311,43 @@ function snapshot(date: string, state: Map<string, Pos>, items: Map<string, Item
 export function averageCosts(data: StockData): Map<string, number> {
   const [s] = stockSnapshots(data, ["9999-12-31"]);
   return new Map(s.items.map((p) => [p.itemId, p.rate] as const));
+}
+
+export const lineCostKey = (kind: "sale" | "saleReturn", docId: string, lineIndex: number) =>
+  `${kind}:${docId}:${lineIndex}`;
+
+/**
+ * What every sale line (and every goods-returned line) cost the shop, at the
+ * weighted average of the moment it moved — derived from the books, never
+ * stored. Editing or deleting a purchase, a production run or a stock
+ * adjustment therefore re-costs every later sale on its own, exactly as Tally
+ * does; a cost frozen onto the bill when it was saved could not.
+ */
+export function saleLineCosts(data: StockData): Map<string, number> {
+  const costs = new Map<string, number>();
+  stockSnapshots(data, ["9999-12-31"], costs);
+  return costs;
+}
+
+/** Cost of goods sold for a set of sales and sale returns (already filtered
+ *  to the period): sale lines at their cost, less physical returns at the
+ *  cost they came back at. A line the books cannot cost (no item) falls back
+ *  to the cost snapshot saved on it. */
+export function cogsOf(
+  sales: Invoice[],
+  saleReturns: Return[],
+  costs: Map<string, number>,
+): number {
+  let total = 0;
+  for (const inv of sales)
+    inv.lineItems.forEach((l, i) => {
+      total += costs.get(lineCostKey("sale", inv.id, i)) ?? num(l.costPrice) * num(l.qty);
+    });
+  for (const r of saleReturns) {
+    if (r.isAdjustmentOnly) continue;
+    r.lineItems.forEach((l, i) => {
+      total -= costs.get(lineCostKey("saleReturn", r.id, i)) ?? num(l.costPrice) * num(l.qty);
+    });
+  }
+  return r2(total);
 }

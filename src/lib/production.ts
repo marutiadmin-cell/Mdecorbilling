@@ -74,7 +74,8 @@ export function consumptionFor(
   return (bom.components ?? []).map((c) => {
     const item = itemsById.get(c.itemId);
     let total = num(c.qty) * scale * (1 + num(c.wastagePct) / 100);
-    const unit = c.unit || item?.unit || "";
+    // The item's CURRENT unit — the BOM's copy is only what it was when saved.
+    const unit = item?.unit || c.unit || "";
     total = roundUpWhole && isWholeUnit(unit) ? Math.ceil(total - 1e-9) : r2(total);
     const rate = r2(num(item?.purchasePrice));
     return {

@@ -129,11 +129,28 @@ function SetupPage() {
 
   const removeAccount = (a: BsAccount) => {
     const used = ledgerUse.get(normalizeLedger(a.name))?.count ?? 0;
-    const msg = used
-      ? `Remove "${a.name}" from the register? ${used} journal voucher line(s) use it — they will show under Suspense until it is classified again. No entry is deleted.`
-      : `Remove "${a.name}" from the register?`;
+    const mapped = Object.entries(config?.expenseClass ?? {}).filter(
+      ([, v]) =>
+        v.startsWith("account:") && normalizeLedger(v.slice(8)) === normalizeLedger(a.name),
+    );
+    const msg = [
+      `Remove "${a.name}" from the register?`,
+      used
+        ? `${used} journal voucher line(s) use it — they will show under Suspense until it is classified again. No entry is deleted.`
+        : "",
+      mapped.length
+        ? `Expense categories posted to it (${mapped.map(([c]) => c).join(", ")}) go back to ordinary expenses.`
+        : "",
+    ]
+      .filter(Boolean)
+      .join("\n\n");
     if (!confirm(msg)) return;
     BsAccountRepo.remove(a.id);
+    if (mapped.length) {
+      const next = { ...(config?.expenseClass ?? {}) };
+      for (const [c] of mapped) delete next[c];
+      saveConfig({ expenseClass: next });
+    }
     toast.success("Removed from the register");
   };
 
@@ -316,6 +333,65 @@ function SetupPage() {
       />
     </div>
   );
+}
+
+/**
+ * Rename a register account EVERYWHERE its name is the link: every Journal
+ * Voucher ledger line that used the old name, the ledger suggestion list,
+ * and any expense category posted to it. The account and its voucher lines
+ * commit together where they fit one batch; more vouchers go in further
+ * batches of 400 (Firestore caps a batch at 500 writes).
+ */
+async function renameRegisterAccount(
+  account: BsAccount,
+  record: Partial<BsAccount> & { name: string },
+): Promise<boolean> {
+  const oldKey = normalizeLedger(account.name);
+  const newName = record.name;
+  const affected = JournalVoucherRepo.all().filter((jv) =>
+    jv.lines.some(
+      (l) => l.kind === "ledger" && normalizeLedger(l.refName || l.refId || "") === oldKey,
+    ),
+  );
+  const renameLines = (jv: (typeof affected)[number]) =>
+    jv.lines.map((l) =>
+      l.kind === "ledger" && normalizeLedger(l.refName || l.refId || "") === oldKey
+        ? { ...l, refId: newName, refName: newName }
+        : l,
+    );
+  let ok = true;
+  for (let i = 0; i === 0 || i < affected.length; i += 400) {
+    const batch = newBatch();
+    if (i === 0) BsAccountRepo.updateBatched(batch, account.id, record);
+    for (const jv of affected.slice(i, i + 400))
+      JournalVoucherRepo.updateBatched(batch, jv.id, { lines: renameLines(jv) });
+    ok = await commitBatch(batch, "rename register account");
+    if (!ok) return false;
+  }
+  // Suggestions and mappings — small single documents, best-effort after.
+  const company = CompanyRepo.get();
+  const list = company.journalLedgerAccounts ?? [];
+  if (list.some((x) => normalizeLedger(x) === oldKey)) {
+    CompanyRepo.save({
+      ...company,
+      journalLedgerAccounts: [
+        ...new Set(list.map((x) => (normalizeLedger(x) === oldKey ? newName : x))),
+      ],
+    });
+  }
+  const config = FinConfigRepo.get(FIN_CONFIG_ID);
+  const classes = config?.expenseClass ?? {};
+  const remapped = Object.fromEntries(
+    Object.entries(classes).map(([c, v]) => [
+      c,
+      v.startsWith("account:") && normalizeLedger(v.slice(8)) === oldKey
+        ? (`account:${newName}` as ExpenseClass)
+        : v,
+    ]),
+  );
+  if (config && JSON.stringify(remapped) !== JSON.stringify(classes))
+    FinConfigRepo.update(FIN_CONFIG_ID, { expenseClass: remapped });
+  return ok;
 }
 
 function Card({
@@ -700,6 +776,17 @@ function AccountDialog({
       depreciationRate: group === "fixedAsset" ? r2(rate) : undefined,
       notes: notes.trim() || undefined,
     };
+    if (account && normalizeLedger(account.name) !== normalizeLedger(n)) {
+      // A register account is matched to its Journal Voucher lines BY NAME,
+      // so a rename has to carry them along or they all fall into Suspense.
+      void renameRegisterAccount(account, record).then((ok) => {
+        if (ok) {
+          toast.success(`Renamed to "${n}" — its journal voucher entries follow it`);
+          onOpenChange(false);
+        }
+      });
+      return;
+    }
     if (account) BsAccountRepo.update(account.id, record);
     else BsAccountRepo.add(record);
     toast.success(account ? "Account updated" : "Account added");

@@ -34,14 +34,14 @@ import {
   netPartyPositions,
   cashFlows,
   netFlow,
-  computeCogs,
   bankFlows,
   valueExTax,
   returnValueExTax,
   totalSettlementDiscount,
 } from "@/lib/ledger";
 import { absorbedConversionCost } from "@/lib/production";
-import { averageCostMap, stockValueOf } from "@/lib/finData";
+import { averageCostMap, saleCostMap, stockValueOf } from "@/lib/finData";
+import { cogsOf } from "@/lib/stockValuation";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
   AreaChart,
@@ -289,14 +289,18 @@ function Dashboard() {
   // shopkeeper means by "today's sales"), but GST collected is owed onward
   // and is not earnings — and COGS is tax-exclusive. Mixing them overstated
   // profit by exactly the period's output GST.
+  // Same live costing as the P&L report: each line at the weighted average
+  // of the moment it moved, so edits and deletes re-cost later sales.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const saleCosts = useMemo(() => saleCostMap(), [data]);
   const periodCogs = useMemo(
     () =>
-      computeCogs(
+      cogsOf(
         data.sales.filter((s) => inRange(s.date, start, end)),
         data.saleReturns.filter((r) => inRange(r.date, start, end)),
-        data.items,
+        saleCosts,
       ),
-    [data, start, end],
+    [data, start, end, saleCosts],
   );
   // Matches the P&L report exactly, including amounts waived at settlement
   // (see totalSettlementDiscount) — those reduce profit even though no cash

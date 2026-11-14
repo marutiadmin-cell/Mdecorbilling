@@ -15,7 +15,8 @@ import { PaginationBar } from "@/components/Pagination";
 import { usePagination } from "@/hooks/usePagination";
 import { ItemDialog, StockAdjustDialog } from "./items";
 import { usePermissions } from "@/hooks/usePermissions";
-import { averageCostMap, costOf, stockValueOf } from "@/lib/finData";
+import { averageCostMap, costOf, saleCostMap, stockValueOf } from "@/lib/finData";
+import { lineCostKey } from "@/lib/stockValuation";
 import { useRepoData, useRepoMemo } from "@/hooks/useRepoData";
 import type { Item, Invoice, Return } from "@/types";
 import {
@@ -60,6 +61,7 @@ function ItemDetailPage() {
   // The item's cost is its weighted average; the last purchase rate is shown
   // beside it for reference.
   const avgCosts = useRepoMemo(() => averageCostMap());
+  const saleCosts = useRepoMemo(() => saleCostMap());
 
   useEffect(() => {
     setItem(ItemRepo.get(id) ?? null);
@@ -72,16 +74,29 @@ function ItemDetailPage() {
     let profit = 0;
     if (!item) return { rows: entries, soldQty, boughtQty, profit };
     const costOf = (l: { costPrice?: number }) => l.costPrice ?? item.purchasePrice ?? 0;
+    // What each sale/return line really cost, live from the books (weighted
+    // average at the moment it moved) — so editing or deleting a purchase
+    // re-costs this item's profit. The saved snapshot is only a fallback.
+    const lineCost = (
+      kind: "sale" | "saleReturn",
+      docId: string,
+      idx: number,
+      l: { qty: number; costPrice?: number },
+    ) => saleCosts.get(lineCostKey(kind, docId, idx)) ?? l.qty * costOf(l);
 
     const collect = (
       docs: (Invoice | Return)[],
       type: string,
       docKind: HistoryRow["docKind"],
       inward: boolean,
-      onQty?: (l: { qty: number; price: number; discountPct: number; costPrice?: number }) => void,
+      onQty?: (
+        l: { qty: number; price: number; discountPct: number; costPrice?: number },
+        docId: string,
+        idx: number,
+      ) => void,
     ) => {
       for (const d of docs) {
-        for (const l of d.lineItems) {
+        for (const [idx, l] of d.lineItems.entries()) {
           if (l.itemId !== id) continue;
           entries.push({
             date: d.date,
@@ -95,14 +110,16 @@ function ItemDetailPage() {
             docId: d.id,
             docKind,
           });
-          onQty?.(l);
+          onQty?.(l, d.id, idx);
         }
       }
     };
 
-    collect(SalesRepo.all(), "Sale", "sale", false, (l) => {
+    collect(SalesRepo.all(), "Sale", "sale", false, (l, docId, idx) => {
       soldQty = r2(soldQty + l.qty);
-      profit = r2(profit + l.qty * l.price * (1 - l.discountPct / 100) - l.qty * costOf(l));
+      profit = r2(
+        profit + l.qty * l.price * (1 - l.discountPct / 100) - lineCost("sale", docId, idx, l),
+      );
     });
     collect(PurchaseRepo.all(), "Purchase", "purchase", true, (l) => {
       boughtQty = r2(boughtQty + l.qty);
@@ -111,10 +128,19 @@ function ItemDetailPage() {
     // correction) moved no goods when it was saved, so it is not a row here
     // and must not change the quantities.
     const physical = (r: Return) => !r.isAdjustmentOnly;
-    collect(SaleReturnRepo.all().filter(physical), "Sale Return", "sale-return", true, (l) => {
-      soldQty = r2(soldQty - l.qty);
-      profit = r2(profit - (l.qty * l.price * (1 - l.discountPct / 100) - l.qty * costOf(l)));
-    });
+    collect(
+      SaleReturnRepo.all().filter(physical),
+      "Sale Return",
+      "sale-return",
+      true,
+      (l, docId, idx) => {
+        soldQty = r2(soldQty - l.qty);
+        profit = r2(
+          profit -
+            (l.qty * l.price * (1 - l.discountPct / 100) - lineCost("saleReturn", docId, idx, l)),
+        );
+      },
+    );
     collect(
       PurchaseReturnRepo.all().filter(physical),
       "Purchase Return",

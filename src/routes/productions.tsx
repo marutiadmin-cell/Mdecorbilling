@@ -470,7 +470,10 @@ function ProductionDialog({
     ...boms
       .filter((b) => !b.archived || b.id === bomId)
       .sort((a, b) => a.name.localeCompare(b.name))
-      .map((b) => ({ value: b.id, label: `${b.name} (makes ${b.finishedItemName})` })),
+      .map((b) => ({
+        value: b.id,
+        label: `${b.name} (makes ${byId.get(b.finishedItemId)?.name ?? b.finishedItemName})`,
+      })),
   ];
 
   const patchLine = (key: string, patch: Partial<DraftLine>) => {

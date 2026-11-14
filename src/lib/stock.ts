@@ -1,5 +1,5 @@
 import { ItemRepo } from "@/repositories";
-import type { LineItem } from "@/types";
+import type { Invoice, LineItem } from "@/types";
 
 /**
  * Aggregates quantity needed per item across `lines` and checks it against
@@ -24,4 +24,26 @@ export function stockShortfalls(lines: LineItem[], reverseLines: LineItem[] = []
     }
   }
   return out;
+}
+
+/**
+ * Each item's LAST purchase rate: the price on its newest purchase line, by
+ * bill date and then entry time — so a backdated bill entered today does not
+ * become the "last" price, and deleting the newest bill hands the title back
+ * to the one before it.
+ */
+export function latestPurchaseRates(
+  purchases: Pick<Invoice, "date" | "createdAt" | "lineItems">[],
+): Map<string, number> {
+  const best = new Map<string, { date: string; created: string; price: number }>();
+  for (const p of purchases) {
+    for (const l of p.lineItems) {
+      if (!l.itemId || !(l.price > 0)) continue;
+      const cur = best.get(l.itemId);
+      const created = p.createdAt || "";
+      if (!cur || p.date > cur.date || (p.date === cur.date && created >= cur.created))
+        best.set(l.itemId, { date: p.date, created, price: l.price });
+    }
+  }
+  return new Map([...best].map(([id, b]) => [id, b.price] as const));
 }

@@ -71,7 +71,7 @@ import { ModePills } from "@/components/ModePills";
 import { QuickAddPartyDialog, type QuickAddPartyDetails } from "@/components/QuickAddPartyDialog";
 import { genId, newBatch, commitBatch } from "@/repositories/base";
 import { enterMovesAlongRow, useEscapeToLeave } from "@/hooks/useFormKeys";
-import { stockShortfalls } from "@/lib/stock";
+import { stockShortfalls, latestPurchaseRates } from "@/lib/stock";
 import { useRepoData, useRepoMemo } from "@/hooks/useRepoData";
 import { stateFromGstin, allocateAcrossRateBuckets } from "@/lib/gstin";
 import { estimateSpec, carriedFields, type EstimateKind } from "@/lib/estimates";
@@ -1189,6 +1189,12 @@ export function InvoiceForm({ mode, existing, initialDocType, fromEstimateId }: 
     }
 
     const stockDelta = isSale ? -1 : 1;
+    // A purchase's "last purchase price" is the NEWEST bill's rate, by bill
+    // date — computed over the purchases as they will be after this save, so
+    // a backdated bill does not overwrite a newer rate.
+    const latestRates = isSale
+      ? null
+      : latestPurchaseRates([...PurchaseRepo.all().filter((p) => p.id !== existing?.id), finalInv]);
     for (const l of finalInv.lineItems) {
       const it = ItemRepo.get(l.itemId);
       if (!it) continue;
@@ -1215,9 +1221,23 @@ export function InvoiceForm({ mode, existing, initialDocType, fromEstimateId }: 
            A PURCHASE still updates the cost, and that is a different thing:
            the latest cost is a fact about what the shop paid, not an offer
            to anybody, and profit is measured against it. */
-        if (!isSale && it.purchasePrice !== l.price) extra.purchasePrice = l.price;
+        const latest = latestRates?.get(l.itemId);
+        if (!isSale && latest !== undefined && it.purchasePrice !== latest)
+          extra.purchasePrice = latest;
       }
       ItemRepo.adjustFieldBatched(batch, it.id, "stock", stockDelta * l.qty, extra);
+    }
+    // An item taken OFF this purchase in an edit: if its last price came
+    // from this bill, hand the title back to its newest remaining purchase.
+    if (!isSale && existing && latestRates) {
+      const stillOn = new Set(finalInv.lineItems.map((l) => l.itemId));
+      for (const l of existing.lineItems) {
+        if (stillOn.has(l.itemId)) continue;
+        const it = ItemRepo.get(l.itemId);
+        const latest = latestRates.get(l.itemId);
+        if (it && latest !== undefined && it.purchasePrice === l.price && latest !== l.price)
+          ItemRepo.adjustFieldBatched(batch, it.id, "stock", 0, { purchasePrice: latest });
+      }
     }
 
     // Warn (non-blocking) when a sale pushes stock below zero — shop can still bill

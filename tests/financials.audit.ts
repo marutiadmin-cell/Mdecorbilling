@@ -37,7 +37,14 @@ import {
   paise,
   type BooksData,
 } from "@/lib/postings";
-import { stockSnapshots, averageCosts, type StockData } from "@/lib/stockValuation";
+import {
+  stockSnapshots,
+  averageCosts,
+  saleLineCosts,
+  cogsOf,
+  type StockData,
+} from "@/lib/stockValuation";
+import { latestPurchaseRates } from "@/lib/stock";
 import { buildFinancials, wdvDepreciation, dayBefore } from "@/lib/financials";
 import { buildPartyStatement, buildBankLedger, cashFlows } from "@/lib/ledger";
 
@@ -77,6 +84,7 @@ export function runFinancialsAudit(assert: Assert) {
   handWorked(assert);
   valuation(assert);
   averageCost(assert);
+  editsFlowThrough(assert);
   depreciation(assert);
   randomized(assert);
 }
@@ -1074,4 +1082,112 @@ function averageCost(assert: Assert) {
     createdAt: "",
   } as Item);
   assert(averageCosts(b).get("G") === 40, "FSA3: no history → the price typed on the item");
+}
+
+/* ═══ FS-E: an edit or delete reaches every figure that depends on it ═════
+   Profit on a sale is costed LIVE from the books, so entering a purchase
+   late, editing its rate or deleting it re-costs the sales after it — the
+   way Tally behaves, and what a cost frozen onto the bill could never do.
+   And the "last purchase price" follows the newest bill by DATE. */
+function editsFlowThrough(assert: Assert) {
+  const b = emptyBooks();
+  b.items = [
+    {
+      id: "F",
+      name: "Fabric",
+      unit: "MTR",
+      gstRate: 5,
+      purchasePrice: 100,
+      salePrice: 0,
+      stock: 15,
+      openingStock: 0,
+      createdAt: "",
+    } as Item,
+  ];
+  const bill = (id: string, date: string, qty: number, price: number, created = date) =>
+    ({
+      id,
+      number: id,
+      date,
+      partyId: "X",
+      partyName: "X",
+      subtotal: 0,
+      discount: 0,
+      taxAmount: 0,
+      total: 0,
+      paid: 0,
+      paymentMode: "credit",
+      createdAt: created,
+      lineItems: [
+        {
+          id: "l",
+          itemId: "F",
+          name: "F",
+          qty,
+          unit: "MTR",
+          price,
+          discountPct: 0,
+          gstRate: 5,
+          amount: 0,
+          costPrice: 100,
+        },
+      ],
+    }) as Invoice;
+  b.purchases = [bill("P1", "2026-05-01", 10, 100)];
+  b.sales = [bill("S1", "2026-06-01", 5, 300)];
+  const cogs = () => cogsOf(b.sales, b.saleReturns, saleLineCosts(b));
+  assert(cogs() === 500, `FSE1: 5 m at 100 cost 500, got ${cogs()}`);
+  // A purchase dated BEFORE the sale, entered later: the sale now cost the
+  // average of both lots (10 @ 100 + 10 @ 200 = 150 a metre).
+  b.purchases.push(bill("P0", "2026-04-01", 10, 200, "2026-07-01"));
+  assert(cogs() === 750, `FSE2: a backdated purchase re-costs the sale to 750, got ${cogs()}`);
+  // Its rate corrected to 160 → average 130 → 650.
+  b.purchases[1] = bill("P0", "2026-04-01", 10, 160, "2026-07-01");
+  assert(cogs() === 650, `FSE3: editing the rate re-costs it to 650, got ${cogs()}`);
+  // Deleted again → back to 500.
+  b.purchases = b.purchases.filter((p) => p.id !== "P0");
+  assert(cogs() === 500, `FSE4: deleting it puts the cost back to 500, got ${cogs()}`);
+  // A purchase AFTER the sale never changes what the sale cost.
+  b.purchases.push(bill("P2", "2026-07-01", 10, 999));
+  assert(cogs() === 500, "FSE5: a later purchase does not re-cost an earlier sale");
+  // A goods return comes back at the cost it went out at, and reverses it.
+  b.saleReturns = [
+    {
+      id: "R",
+      number: "R",
+      date: "2026-06-02",
+      partyId: "X",
+      partyName: "X",
+      subtotal: 0,
+      taxAmount: 0,
+      total: 0,
+      createdAt: "",
+      lineItems: [
+        {
+          id: "l",
+          itemId: "F",
+          name: "F",
+          qty: 2,
+          unit: "MTR",
+          price: 300,
+          discountPct: 0,
+          gstRate: 5,
+          amount: 0,
+        },
+      ],
+    } as Return,
+  ];
+  assert(cogs() === 300, `FSE6: returning 2 m takes 200 off, got ${cogs()}`);
+
+  // Last purchase price: newest by bill DATE, not by when it was typed.
+  const rates = latestPurchaseRates([
+    bill("A", "2026-05-01", 1, 120, "2026-05-01"),
+    bill("B", "2026-03-01", 1, 90, "2026-08-01"),
+  ]);
+  assert(rates.get("F") === 120, "FSE7: a backdated bill does not become the last purchase price");
+  const after = latestPurchaseRates([bill("B", "2026-03-01", 1, 90)]);
+  assert(
+    after.get("F") === 90,
+    "FSE8: deleting the newest bill hands the price back to the one before",
+  );
 }

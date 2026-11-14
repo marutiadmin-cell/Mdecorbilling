@@ -27,6 +27,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { bankParts, describePayment } from "@/lib/paymentSplit";
+import { latestPurchaseRates } from "@/lib/stock";
 import { PaginationBar } from "@/components/Pagination";
 import { usePagination } from "@/hooks/usePagination";
 import { DataTable } from "@/components/DataTable";
@@ -194,9 +195,19 @@ function PurchasePage() {
     // together — a shared batch commits them as one atomic Firestore write.
     const batch = newBatch();
     // Reverse the stock addition this purchase made
+    // The "last purchase price" this bill set goes back to the newest
+    // remaining purchase — only where this bill is what set it (a later
+    // purchase, a production run or a hand edit is a newer answer).
+    const latestRates = latestPurchaseRates(PurchaseRepo.all().filter((p) => p.id !== live.id));
     for (const l of live.lineItems) {
       const it = ItemRepo.get(l.itemId);
-      if (it) ItemRepo.adjustFieldBatched(batch, it.id, "stock", -l.qty);
+      if (!it) continue;
+      const latest = latestRates.get(l.itemId);
+      const extra =
+        latest !== undefined && it.purchasePrice === l.price && latest !== l.price
+          ? { purchasePrice: latest }
+          : undefined;
+      ItemRepo.adjustFieldBatched(batch, it.id, "stock", -l.qty, extra);
     }
     // Payments applied to this bill: unlink them so the money stays
     // counted as an advance instead of silently disappearing

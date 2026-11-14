@@ -64,7 +64,14 @@ function BomsPage() {
     () =>
       BomRepo.all()
         .filter((b) => (showArchived ? b.archived : !b.archived))
-        .filter((b) => !q.trim() || matchesQuery(q, `${b.name} ${b.finishedItemName}`))
+        .filter(
+          (b) =>
+            !q.trim() ||
+            matchesQuery(
+              q,
+              `${b.name} ${b.finishedItemName} ${ItemRepo.get(b.finishedItemId)?.name ?? ""}`,
+            ),
+        )
         .sort((a, b) => a.name.localeCompare(b.name)),
     [q, showArchived],
   );
@@ -233,7 +240,8 @@ function BomsPage() {
                   </p>
                 </div>
                 <p className="text-[11px] text-gray-400 mt-1 truncate">
-                  Makes {b.outputQty} × {b.finishedItemName} · {b.components.length} materials
+                  Makes {b.outputQty} × {byId.get(b.finishedItemId)?.name ?? b.finishedItemName} ·{" "}
+                  {b.components.length} materials
                 </p>
               </div>
             ))}

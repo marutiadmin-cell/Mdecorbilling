@@ -22,7 +22,7 @@ import {
   StockAdjustmentRepo,
 } from "@/repositories";
 import { buildPostings, type BooksData } from "@/lib/postings";
-import { averageCosts, type StockData } from "@/lib/stockValuation";
+import { averageCosts, saleLineCosts, type StockData } from "@/lib/stockValuation";
 import type { FinInput } from "@/lib/financials";
 
 export const FIN_CONFIG_ID = "config";
@@ -78,4 +78,11 @@ export function stockValueOf(
   item: { id: string; stock?: number; purchasePrice?: number },
 ): number {
   return Math.round(Math.max(0, item.stock ?? 0) * costOf(map, item) * 100) / 100;
+}
+
+/** What every sale / sale-return line cost the shop, live from the books —
+ *  see saleLineCosts. Recomputed on every change, so an edited or deleted
+ *  purchase re-costs every later sale. */
+export function saleCostMap(): Map<string, number> {
+  return saleLineCosts(booksData());
 }
