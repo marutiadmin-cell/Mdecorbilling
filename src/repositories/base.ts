@@ -110,10 +110,26 @@ function stripUndefined<T>(v: T): T {
   return v;
 }
 
+/** Firestore said no — not the network. For a collection this build just
+ *  added, that almost always means the new firestore.rules were never
+ *  published, and "check internet" sends the shop looking in the wrong place. */
+const isPermissionDenied = (err: unknown) =>
+  (err as { code?: string } | null)?.code === "permission-denied";
+
+const RULES_HINT =
+  "The cloud refused it (permission denied). If this is a new screen, the owner must publish the latest Firestore rules in the Firebase console, then reload the app.";
+
 const writeError = (action: string) => (err: unknown) => {
   console.error(`Firestore ${action} failed`, err);
+  if (isPermissionDenied(err)) {
+    toast.error(`Could not save (${action}). ${RULES_HINT}`, { duration: 15000 });
+    return;
+  }
   toast.error(`Could not save to cloud (${action}). Check internet & try again.`);
 };
+
+/** Said once per collection per session — not once per listener retry. */
+const loadRefusalShown = new Set<string>();
 
 /**
  * Firestore-backed repository with the SAME synchronous API the whole app
@@ -163,6 +179,10 @@ export class Repository<T extends { id: string }> {
         (err) => {
           if (first) {
             console.error(`Failed to load "${this.name}"`, err);
+            if (isPermissionDenied(err) && !loadRefusalShown.has(this.name)) {
+              loadRefusalShown.add(this.name);
+              toast.error(`Could not load "${this.name}". ${RULES_HINT}`, { duration: 15000 });
+            }
             first = false;
             reject(err);
           } else handlePostHydrationError(err, this.name);

@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { PageHeader } from "@/components/PageHeader";
 import { DataTable, type Column } from "@/components/DataTable";
 import { BomRepo, ItemRepo, ProductionRepo } from "@/repositories";
-import { genId } from "@/repositories/base";
+import { genId, newBatch, commitBatch } from "@/repositories/base";
 import { useRepoData, useRepoMemo } from "@/hooks/useRepoData";
 import { useStickyState } from "@/hooks/useStickySearch";
 import { useAutoFocusOnDesktop } from "@/hooks/use-mobile";
@@ -426,14 +426,18 @@ function BomDialog({
       notes: notes.trim() || undefined,
       archived: archived || undefined,
     };
-    if (bom) {
-      BomRepo.update(bom.id, record);
-      toast.success("BOM updated");
-    } else {
-      BomRepo.add({ ...record, id: undefined });
-      toast.success("BOM saved");
-    }
-    onOpenChange(false);
+    // Wait for the cloud to accept it before saying "saved" — a refused save
+    // (no connection, rules not published) keeps the dialog open with what
+    // was typed, instead of closing on a success that never happened.
+    const batch = newBatch();
+    if (bom) BomRepo.updateBatched(batch, bom.id, record);
+    else BomRepo.addBatched(batch, { ...record, id: undefined });
+    void commitBatch(batch, bom ? "update BOM" : "save BOM").then((ok) => {
+      savingRef.current = false;
+      if (!ok) return;
+      toast.success(bom ? "BOM updated" : "BOM saved");
+      onOpenChange(false);
+    });
   };
 
   const inputCls =
