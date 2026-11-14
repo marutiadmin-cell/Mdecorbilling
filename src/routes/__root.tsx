@@ -238,7 +238,10 @@ function RootComponent() {
   return (
     <QueryClientProvider client={queryClient}>
       <AuthGate />
-      <Toaster position="bottom-right" duration={3000} closeButton richColors />
+      {/* Top, not bottom-right: every form's Save / Confirm button lives at
+          the bottom right, and a toast parked there for 3 s swallowed the
+          click meant for it (found by the monkey test — real mouse clicks). */}
+      <Toaster position="top-center" duration={3000} closeButton richColors />
     </QueryClientProvider>
   );
 }

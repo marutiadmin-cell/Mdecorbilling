@@ -437,6 +437,18 @@ function ItemsPage() {
                           <ArrowUpDown className="h-3.5 w-3.5" />
                         </button>
                       )}
+                      {deleteAllowed && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            deleteItem(r);
+                          }}
+                          className="p-1.5 rounded hover:bg-rose-50 text-gray-300 hover:text-rose-500 transition"
+                          title="Delete item"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      )}
                     </div>
                   </div>
                 </div>

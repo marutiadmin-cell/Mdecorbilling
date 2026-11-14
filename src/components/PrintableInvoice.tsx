@@ -99,9 +99,16 @@ function numToWords(n: number): string {
       (num % 10000000 ? " " + inWords(num % 10000000) : "")
     );
   };
-  const rupees = Math.floor(n);
-  const paise = Math.round((n - rupees) * 100);
-  let s = inWords(rupees) + " Rupees";
+  // Never recurse on something that is not a plain amount: NaN fell through
+  // every comparison above into the crore branch and called itself forever,
+  // taking the whole bill screen down with a stack overflow.
+  const value = Number(n);
+  if (!Number.isFinite(value)) return "";
+  if (value < 0) return "Minus " + numToWords(-value);
+  const rupees = Math.floor(value);
+  const paise = Math.round((value - rupees) * 100);
+  if (rupees === 0 && !paise) return "Zero Rupees Only";
+  let s = (rupees ? inWords(rupees) : "Zero") + " Rupees";
   if (paise) s += " and " + inWords(paise) + " Paise";
   return s + " Only";
 }

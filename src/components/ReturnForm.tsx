@@ -264,9 +264,11 @@ export function ReturnForm({ mode }: Props) {
       name: it.name,
       qty: 1,
       unit: it.unit,
-      price: isSaleReturn ? it.salePrice || it.purchasePrice : it.purchasePrice,
+      // Missing → 0, text → number: a NaN here poisons the whole note.
+      price:
+        Number(isSaleReturn ? it.salePrice || it.purchasePrice : it.purchasePrice) || 0,
       discountPct: 0,
-      gstRate: it.gstRate,
+      gstRate: Number(it.gstRate) || 0,
       amount: 0,
       // Goods coming back from a customer reverse exactly the cost their sale
       // booked; otherwise (a purchase return, or no matching bill) the

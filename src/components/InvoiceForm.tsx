@@ -153,6 +153,13 @@ function placementStyle(p: PopupPlacement, cap?: number): React.CSSProperties {
   };
 }
 
+/** A price or rate from an item record, as a number: missing → 0, "900" → 900.
+ *  Item records can hold either (imports, older data); a line must not. */
+const priceNum = (v: unknown): number => {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : 0;
+};
+
 export function InvoiceForm({ mode, existing, initialDocType, fromEstimateId }: Props) {
   // The app now opens BEFORE the collections have loaded (see hydrateRepos),
   // so every repo read in this form has to be keyed on this version or it
@@ -728,9 +735,9 @@ export function InvoiceForm({ mode, existing, initialDocType, fromEstimateId }: 
       name: it.name,
       qty: 1,
       unit: it.unit,
-      price: isSale ? (it.salePrice ?? 0) : (historicalPrice ?? it.purchasePrice),
+      price: priceNum(isSale ? it.salePrice : (historicalPrice ?? it.purchasePrice)),
       discountPct: 0,
-      gstRate: it.gstRate,
+      gstRate: priceNum(it.gstRate),
       amount: 0,
       costPrice: itemCost(it),
       hsn: it.hsn || undefined,
@@ -837,8 +844,8 @@ export function InvoiceForm({ mode, existing, initialDocType, fromEstimateId }: 
       itemId: it.id,
       name: it.name,
       unit: it.unit,
-      gstRate: it.gstRate,
-      price: isSale ? (it.salePrice ?? 0) : (historicalPrice ?? it.purchasePrice),
+      gstRate: priceNum(it.gstRate),
+      price: priceNum(isSale ? it.salePrice : (historicalPrice ?? it.purchasePrice)),
       costPrice: itemCost(it),
       hsn: it.hsn || undefined,
       // The old item's foreign price must not survive the swap — a later
@@ -2519,7 +2526,7 @@ export function InvoiceForm({ mode, existing, initialDocType, fromEstimateId }: 
                     </div>
                   )}
                   {bankOpen && bankQ && bankSuggests.length === 0 && (
-                    <div className="absolute z-20 top-full left-0 right-0 mt-1 border rounded-md bg-popover shadow-elevated px-3 py-2 text-xs text-muted-foreground">
+                    <div className="pointer-events-none absolute z-20 top-full left-0 right-0 mt-1 border rounded-md bg-popover shadow-elevated px-3 py-2 text-xs text-muted-foreground">
                       No matching bank account
                     </div>
                   )}

@@ -1783,7 +1783,7 @@ export function ReceivePaymentDialog({
                 </div>
               )}
               {bankOpen && bankQ && bankSuggests.length === 0 && (
-                <div className="absolute z-20 top-full left-0 right-0 mt-1 border rounded-md bg-popover shadow-lg px-3 py-2 text-xs text-muted-foreground">
+                <div className="pointer-events-none absolute z-20 top-full left-0 right-0 mt-1 border rounded-md bg-popover shadow-lg px-3 py-2 text-xs text-muted-foreground">
                   No matching bank account
                 </div>
               )}

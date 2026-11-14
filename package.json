@@ -18,6 +18,7 @@
     "format": "prettier --write .",
     "audit:ledger": "esbuild tests/audit.test.ts --bundle --platform=node --format=cjs --alias:@=./src --outfile=node_modules/.cache/audit.test.cjs && node node_modules/.cache/audit.test.cjs",
     "test:screens": "node tests/run-screens.cjs",
+    "test:monkey": "node tests/run-screens.cjs monkey",
     "test": "npm run audit:ledger && npm run test:screens"
   },
   "dependencies": {

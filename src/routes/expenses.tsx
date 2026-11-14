@@ -569,7 +569,7 @@ function ExpenseDialog({
               </div>
             )}
             {payeeOpen && payeeSuggests.length === 0 && payeeQ.trim() && (
-              <p className="absolute z-20 top-full left-0 right-0 mt-1 border rounded-md bg-popover shadow-elevated px-3 py-2 text-xs text-primary">
+              <p className="pointer-events-none absolute z-20 top-full left-0 right-0 mt-1 border rounded-md bg-popover shadow-elevated px-3 py-2 text-xs text-primary">
                 New payee — "{payeeQ.trim()}" will be added
               </p>
             )}
@@ -687,7 +687,7 @@ function ExpenseDialog({
                 </div>
               )}
               {bankOpen && bankQ && bankSuggests.length === 0 && (
-                <div className="absolute z-20 top-full left-0 right-0 mt-1 border rounded-md bg-popover shadow-elevated px-3 py-2 text-xs text-muted-foreground">
+                <div className="pointer-events-none absolute z-20 top-full left-0 right-0 mt-1 border rounded-md bg-popover shadow-elevated px-3 py-2 text-xs text-muted-foreground">
                   No matching bank account
                 </div>
               )}

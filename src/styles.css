@@ -535,3 +535,16 @@ button,
     font-size: 12px;
   }
 }
+
+/* Toasts inform; they must never swallow a click meant for what sits under
+   them. Parked over a form's Save (bottom) or a page's "New …" button (top,
+   full width on a phone), a 3-second toast made the shop's tap do nothing —
+   found by the monkey test, which clicks the way a finger does. The toast's
+   own buttons (close, undo) still take clicks. */
+[data-sonner-toast] {
+  pointer-events: none;
+}
+[data-sonner-toast] button,
+[data-sonner-toast] a {
+  pointer-events: auto;
+}

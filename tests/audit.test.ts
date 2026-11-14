@@ -2994,7 +2994,10 @@ console.log(`\n═════════════════════�
    fail is not evidence. */
 {
   const form = readFileSync(process.cwd() + "/src/components/InvoiceForm.tsx", "utf8");
-  const want = "price: isSale ? (it.salePrice ?? 0) : (historicalPrice ?? it.purchasePrice),";
+  // priceNum() only turns a missing or text price into a number (an item
+  // with no price used to make the line NaN and crash the form); the rule
+  // — sale at the selling price, purchase at history then cost — is the same.
+  const want = "price: priceNum(isSale ? it.salePrice : (historicalPrice ?? it.purchasePrice)),";
   const n = form.split(want).length - 1;
   assert(
     n === 2,
