@@ -25,7 +25,8 @@ import { stockShortfalls } from "@/lib/stock";
 import { NumInput } from "@/components/NumInput";
 import { ComboInput } from "@/components/ComboInput";
 import { SelectMenu } from "@/components/SelectMenu";
-import { QuickAddPartyDialog, type QuickAddPartyDetails } from "@/components/QuickAddPartyDialog";
+// The Parties page's own form — one party form everywhere in the app.
+import { PartyDialog } from "@/routes/parties";
 import { useRepoData, useRepoMemo } from "@/hooks/useRepoData";
 import { matchesQuery, byRelevance } from "@/lib/search";
 
@@ -510,33 +511,11 @@ export function ReturnForm({ mode }: Props) {
     setQuickAddParty({ name: partyName, phone: "" });
   };
 
-  const confirmQuickAddParty = (details: QuickAddPartyDetails) => {
+  /** The party form created — or found — the party: carry on saving. */
+  const onQuickPartyCreated = (p: Party) => {
     if (!quickAddParty) return;
-    const name = details.name.trim() || quickAddParty.name;
-    const phone = details.phone.trim();
     setQuickAddParty(null);
-    // The name may have been EDITED inside the dialog — re-check so a
-    // same-phone or same-name party (any capitalisation) is reused, never
-    // duplicated. Mirrors InvoiceForm's confirmQuickAddParty.
-    const match =
-      (phone ? allParties.find((p) => (p.phone ?? "").trim() === phone) : undefined) ??
-      allParties.find((p) => p.name.trim().toLowerCase() === name.toLowerCase());
-    if (match) {
-      toast.info(`Using existing party: ${match.name}`);
-      finalizeSave({ id: match.id, name: match.name });
-      return;
-    }
-    const newParty: Party = {
-      id: genId(),
-      name,
-      type: "both",
-      phone: phone || undefined,
-      openingBalance: details.openingBalance || 0,
-      gstin: details.gstin.trim() || undefined,
-      creditLimit: details.creditLimit || undefined,
-      createdAt: new Date().toISOString(),
-    };
-    finalizeSave({ create: newParty });
+    finalizeSave({ id: p.id, name: p.name });
   };
 
   useEffect(() => {
@@ -976,11 +955,16 @@ export function ReturnForm({ mode }: Props) {
           {saving ? "Saving…" : "Save"}
         </Button>
       </div>
-      <QuickAddPartyDialog
-        draft={quickAddParty}
-        isSale={isSaleReturn}
-        onCancel={() => setQuickAddParty(null)}
-        onConfirm={confirmQuickAddParty}
+      <PartyDialog
+        open={!!quickAddParty}
+        onOpenChange={(v) => {
+          if (!v) setQuickAddParty(null);
+        }}
+        party={null}
+        initialName={quickAddParty?.name}
+        initialPhone={quickAddParty?.phone}
+        onSaved={() => {}}
+        onCreated={onQuickPartyCreated}
       />
     </div>
   );

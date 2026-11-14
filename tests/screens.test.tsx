@@ -3089,14 +3089,21 @@ async function runAll(): Promise<Results> {
     });
     await settleMs(180);
 
-    const nameField = document.querySelector(
-      'input[aria-label="Category for the new item"]',
-    ) as HTMLInputElement | null;
-    assert(!!nameField, "change item: the add-item dialog opened for it");
-
-    const dlg = nameField?.closest('[role="dialog"]') as HTMLElement | null;
-    const create = Array.from(dlg?.querySelectorAll("button") ?? []).find((b) =>
-      /^Add & Continue/i.test((b.textContent ?? "").trim()),
+    /* The Items page's own form — not a cut-down copy of it. */
+    const dlg = Array.from(document.querySelectorAll('[role="dialog"]')).find((d) =>
+      /New Item/.test(d.querySelector("h2")?.textContent ?? ""),
+    ) as HTMLElement | undefined;
+    assert(!!dlg, "change item: the add-item dialog opened for it");
+    const dlgText = dlg?.textContent ?? "";
+    for (const field of ["Item type", "HSN/SAC Code", "Opening Stock", "Min Stock"]) {
+      has(dlgText, field, `change item: it is the full item form, with "${field}"`);
+    }
+    assert(
+      (dlg?.querySelector("input") as HTMLInputElement | null)?.value === "Braided Cable 2m",
+      "change item: the form starts with the name that was typed",
+    );
+    const create = Array.from(dlg?.querySelectorAll("button") ?? []).find(
+      (b) => (b.textContent ?? "").trim() === "Save",
     );
     assert(!!create, "change item: found the create button");
     await act(async () => {
@@ -3211,9 +3218,10 @@ async function runAll(): Promise<Results> {
     });
     await settleMs(180);
 
-    const catBox = document.querySelector(
-      'input[aria-label="Category for the new item"]',
-    ) as HTMLInputElement | null;
+    const itemDlg = Array.from(document.querySelectorAll('[role="dialog"]')).find((d) =>
+      /New Item/.test(d.querySelector("h2")?.textContent ?? ""),
+    ) as HTMLElement | undefined;
+    const catBox = itemDlg?.querySelector('input[aria-label="Category"]') as HTMLInputElement | null;
     assert(!!catBox, "new item category: the add-item dialog asks for a category at all");
 
     await act(async () => {
@@ -3237,8 +3245,8 @@ async function runAll(): Promise<Results> {
        and quietly makes this assert nothing. */
     const addDialog = catBox?.closest('[role="dialog"]') as HTMLElement | null;
     assert(!!addDialog, "new item category: the add-item dialog is on screen");
-    const create = Array.from(addDialog?.querySelectorAll("button") ?? []).find((b) =>
-      /^Add & Continue/i.test((b.textContent ?? "").trim()),
+    const create = Array.from(addDialog?.querySelectorAll("button") ?? []).find(
+      (b) => (b.textContent ?? "").trim() === "Save",
     );
     assert(!!create, "new item category: found the button that creates it");
     await act(async () => {
@@ -6028,6 +6036,54 @@ async function runAll(): Promise<Results> {
         "Edit BOM",
         "boms: a row opens its recipe for editing",
       );
+
+      /* A material that is not an item yet: "+ Add new item" opens the Items
+         page's own form (raw material pre-selected), and the item it saves
+         becomes that row's material. It used to say "add it on the Items
+         page first" — leave the recipe, lose it, come back. */
+      const matBox = currentDialog().querySelector(
+        'input[aria-label="Material"]',
+      ) as HTMLInputElement | null;
+      assert(!!matBox, "boms: a material picker is in the recipe");
+      await act(async () => {
+        matBox?.focus();
+        setInput(matBox, "Brass Legs Q7");
+      });
+      await settleMs(150);
+      const addOpt = Array.from(document.querySelectorAll('[role="option"]')).find((o) =>
+        (o.textContent ?? "").includes('+ Add new item "Brass Legs Q7"'),
+      ) as HTMLElement | undefined;
+      assert(!!addOpt, "boms: a material matching nothing offers + Add new item");
+      await act(async () => {
+        addOpt?.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true }));
+      });
+      await settleMs(200);
+      const itemDlg = Array.from(document.querySelectorAll('[role="dialog"]')).find((d) =>
+        /New Item/.test(d.querySelector("h2")?.textContent ?? ""),
+      ) as HTMLElement | undefined;
+      assert(!!itemDlg, "boms: + Add new item opens the full item form");
+      has(itemDlg?.textContent ?? "", "HSN/SAC Code", "boms: it is the Items page's form");
+      assert(
+        (itemDlg?.querySelector("input") as HTMLInputElement | null)?.value === "Brass Legs Q7",
+        "boms: the item form starts with the typed name",
+      );
+      await act(async () => {
+        Array.from(itemDlg?.querySelectorAll("button") ?? [])
+          .find((b) => (b.textContent ?? "").trim() === "Save")
+          ?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      });
+      await settleMs(250);
+      const legs = ItemRepo.all().find((i) => i.name === "Brass Legs Q7");
+      assert(!!legs, "boms: the material item was created");
+      assert(legs?.kind === "raw", `boms: as a raw material, got ${legs?.kind}`);
+      assert(
+        (
+          currentDialog().querySelector('input[aria-label="Material"]') as HTMLInputElement | null
+        )?.value === "Brass Legs Q7",
+        "boms: and the recipe row now uses it",
+      );
+      if (legs) ItemRepo.remove(legs.id);
+
       await act(async () => {
         document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
       });
@@ -6353,7 +6409,9 @@ async function runAll(): Promise<Results> {
       "edit: an amount below what the bills take is refused, nothing changes",
     );
 
-    // 4. A brand-new party typed by name, amount entered, saves.
+    // 4. A brand-new party typed by name: the Parties page's own form opens
+    //    for it (same as a sale or purchase does), and once that is saved
+    //    the receipt goes through against the new party.
     await renderRoute("/payments");
     await click(findButton(/Receive Payment/));
     const box = currentDialog().querySelector(
@@ -6366,6 +6424,35 @@ async function runAll(): Promise<Results> {
     await click(currentDialog().querySelector('[data-mode="cash"]'));
     await click(findButton(/Confirm Receipt/));
     await settleMs(200);
+    assert(
+      !PaymentRepo.all().some((p) => p.partyName === "Walk In Buyer Zed"),
+      "receipt: a name matching nobody is not saved with a bare, made-up party",
+    );
+    const partyDlg = Array.from(document.querySelectorAll('[role="dialog"]')).find((d) =>
+      /New Party/.test(d.querySelector("h2")?.textContent ?? ""),
+    ) as HTMLElement | undefined;
+    assert(!!partyDlg, "receipt: the full party form opens for the new name");
+    for (const field of ["Address line 1", "GSTIN", "Party type"]) {
+      has(
+        (partyDlg?.textContent ?? "") + (partyDlg?.querySelector(`[aria-label="${field}"]`) ? field : ""),
+        field,
+        `receipt: it is the Parties page's form, with "${field}"`,
+      );
+    }
+    assert(
+      (partyDlg?.querySelector("input") as HTMLInputElement | null)?.value === "Walk In Buyer Zed",
+      "receipt: the party form starts with the name that was typed",
+    );
+    await click(
+      Array.from(partyDlg?.querySelectorAll("button") ?? []).find(
+        (b) => (b.textContent ?? "").trim() === "Save",
+      ),
+    );
+    await settleMs(250);
+    assert(
+      PartyRepo.all().filter((p) => p.name === "Walk In Buyer Zed").length === 1,
+      "receipt: the party is created once",
+    );
     assert(
       PaymentRepo.all().some((p) => p.partyName === "Walk In Buyer Zed" && p.amount === 1000),
       "receipt: a new party typed by name with an amount is saved",

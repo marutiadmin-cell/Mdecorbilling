@@ -52,6 +52,8 @@ import { NumInput } from "@/components/NumInput";
 import { ModePills } from "@/components/ModePills";
 import { fmtMode } from "@/lib/paymentMode";
 import { PageHeader } from "@/components/PageHeader";
+// The Parties page's own form — one party form everywhere in the app.
+import { PartyDialog } from "@/routes/parties";
 
 /** An account's name for display. The word "Bank" three times over is
  *  exactly what a split is meant to stop being ambiguous. */
@@ -604,6 +606,8 @@ export function ReceivePaymentDialog({
   const partyListRef = useRef<HTMLDivElement>(null);
   useHighlightScroll(partyListRef, partyIdx, partyOpen);
   const [selectedParty, setSelectedParty] = useState<{ id: string; name: string } | null>(null);
+  /** A typed name matching nobody: the full party form is open for it. */
+  const [newPartyName, setNewPartyName] = useState<string | null>(null);
 
   const [date, setDate] = useState(today());
   const [mode, setMode] = useState<PaymentMode>("cash");
@@ -939,9 +943,10 @@ export function ReceivePaymentDialog({
     setApplyRows((rows) => rows.map((r) => ({ ...r, checked: false, apply: 0, discount: 0 })));
   };
 
-  const save = () => {
+  const save = (pickedParty?: { id: string; name: string }) => {
     if (savingRef.current) return; // double-click protection
-    if (!selectedParty && !partyQ.trim()) {
+    let sp = pickedParty ?? selectedParty;
+    if (!sp && !partyQ.trim()) {
       toast.error("Select or enter a party");
       return;
     }
@@ -985,6 +990,19 @@ export function ReceivePaymentDialog({
         return;
       }
     }
+    /* A typed name: an existing party (any capitalisation) is used as is. A
+       new one opens the Parties page's own form — the same as a sale or a
+       purchase does — and the receipt carries on once it is saved, so the
+       party gets its phone, address and GST details instead of a bare name. */
+    if (!sp) {
+      const typed = partyQ.trim();
+      const match = allParties.find((p) => p.name.trim().toLowerCase() === typed.toLowerCase());
+      if (!match) {
+        setNewPartyName(typed);
+        return;
+      }
+      sp = { id: match.id, name: match.name };
+    }
     savingRef.current = true;
     setSaving(true);
 
@@ -1000,19 +1018,8 @@ export function ReceivePaymentDialog({
       // invoice never shows as paid).
       const batch = newBatch();
 
-      let partyId = selectedParty?.id ?? "";
-      const partyName = selectedParty?.name ?? partyQ.trim();
-      if (!partyId) {
-        const match = allParties.find((p) => p.name.toLowerCase() === partyName.toLowerCase());
-        partyId = match?.id ?? genId();
-        if (!match)
-          PartyRepo.addBatched(batch, {
-            id: partyId,
-            name: partyName,
-            type: "both",
-            openingBalance: 0,
-          });
-      }
+      const partyId = sp.id;
+      const partyName = sp.name;
       // Recording a NEW payment against an archived party reactivates them —
       // restore in the same batch (matches the sale/purchase form). Only for a
       // new payment: editing an existing payment whose party is already
@@ -1816,7 +1823,7 @@ export function ReceivePaymentDialog({
                 Cancel
               </Button>
               <Button
-                onClick={save}
+                onClick={() => save()}
                 disabled={saving}
                 className={`flex-1 sm:flex-none ${
                   isIn
@@ -1842,6 +1849,22 @@ export function ReceivePaymentDialog({
           </div>
         </div>
       </DialogContent>
+      <PartyDialog
+        open={newPartyName !== null}
+        onOpenChange={(v) => {
+          if (!v) setNewPartyName(null);
+        }}
+        party={null}
+        initialName={newPartyName ?? undefined}
+        onSaved={() => {}}
+        onCreated={(p) => {
+          setNewPartyName(null);
+          const picked = { id: p.id, name: p.name };
+          setSelectedParty(picked);
+          setPartyQ(p.name);
+          save(picked);
+        }}
+      />
     </Dialog>
   );
 }

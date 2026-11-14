@@ -663,6 +663,8 @@ function ProductionDialog({
                   setLines((list) => list.filter((l) => l.itemId !== it.id));
                 }}
                 ariaLabel="Finished item"
+                allowAdd
+                newItemKind="finished"
                 className={inputCls}
               />
             </label>
@@ -766,6 +768,8 @@ function ProductionDialog({
                         })
                       }
                       ariaLabel="Material"
+                      allowAdd
+                      newItemKind="raw"
                       className={inputCls}
                     />
                     <NumInput

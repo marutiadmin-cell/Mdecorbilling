@@ -1095,16 +1095,33 @@ function GstinVerdictLine({ gstin, pan }: { gstin?: string; pan?: string }) {
   );
 }
 
+/**
+ * THE party form — the same one wherever a party is created or edited: the
+ * Parties page, a party's own page, and a sale, purchase, return or payment
+ * whose typed name matches nobody yet. Those used to open a cut-down "quick
+ * add" form with five fields, so a customer made at the counter never got
+ * the address, state or GST details the Parties page asks for.
+ *
+ * Opened from another form: `initialName`/`initialPhone` are what was typed
+ * there, and `onCreated` hands the new party back so that form can carry on.
+ * If the name already exists, that party is handed back instead of refusing.
+ */
 export function PartyDialog({
   open,
   onOpenChange,
   party,
   onSaved,
+  initialName,
+  initialPhone,
+  onCreated,
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
   party: Party | null;
   onSaved: () => void;
+  initialName?: string;
+  initialPhone?: string;
+  onCreated?: (party: Party) => void;
 }) {
   const firstRef = useRef<HTMLInputElement>(null);
   const [form, setForm] = useState<Partial<Party>>({});
@@ -1123,12 +1140,22 @@ export function PartyDialog({
 
   useEffect(() => {
     if (open) {
-      setForm(party ?? { type: "both", openingBalance: 0 });
+      setForm(
+        party ?? {
+          type: "both",
+          openingBalance: 0,
+          name: initialName?.trim() || undefined,
+          phone: initialPhone?.trim() || undefined,
+        },
+      );
       setOpeningDir((party?.openingBalance ?? 0) < 0 ? "payable" : "receivable");
       setSaving(false);
       setNameOpen(false);
       setTimeout(() => firstRef.current?.focus(), 50);
     }
+    // The typed name/phone seed the form only as it opens — re-seeding while
+    // it is open would wipe what the person has typed since.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, party]);
 
   const save = (e: React.FormEvent) => {
@@ -1143,6 +1170,13 @@ export function PartyDialog({
     const dup = PartyRepo.all().find(
       (p) => p.name.trim().toLowerCase() === form.name!.trim().toLowerCase() && p.id !== party?.id,
     );
+    if (dup && !party && onCreated && !dup.archived) {
+      // Opened from a bill or payment: they meant this party — use it.
+      toast.info(`Using existing party: ${dup.name}`);
+      onCreated(dup);
+      onOpenChange(false);
+      return;
+    }
     if (dup) {
       toast.error(
         dup.archived
@@ -1156,13 +1190,14 @@ export function PartyDialog({
       PartyRepo.update(party.id, form as Party);
       toast.success("Party updated");
     } else {
-      PartyRepo.add({
+      const created = PartyRepo.add({
         ...form,
         name: form.name!,
         type: form.type ?? "both",
         openingBalance: form.openingBalance ?? 0,
       });
       toast.success("Party created");
+      onCreated?.(created as Party);
     }
     onSaved();
     onOpenChange(false);

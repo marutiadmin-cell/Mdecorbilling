@@ -463,6 +463,8 @@ function BomDialog({
                   setComponents((list) => list.filter((c) => c.itemId !== it.id));
                 }}
                 ariaLabel="Finished item"
+                allowAdd
+                newItemKind="finished"
                 autoFocus={!bom}
                 className={inputCls}
               />
@@ -515,6 +517,8 @@ function BomDialog({
                         })
                       }
                       ariaLabel="Material"
+                      allowAdd
+                      newItemKind="raw"
                       className={inputCls}
                     />
                     <NumInput

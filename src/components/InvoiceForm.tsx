@@ -68,7 +68,10 @@ import {
 import { PrintableInvoice } from "@/components/PrintableInvoice";
 import { NumInput, NumField } from "@/components/NumInput";
 import { ModePills } from "@/components/ModePills";
-import { QuickAddPartyDialog, type QuickAddPartyDetails } from "@/components/QuickAddPartyDialog";
+// The app's ONE item form and ONE party form — the same ones the Items and
+// Parties pages open — so anything created from a bill gets every field.
+import { ItemDialog } from "@/routes/items";
+import { PartyDialog } from "@/routes/parties";
 import { genId, newBatch, commitBatch } from "@/repositories/base";
 import { enterMovesAlongRow, useEscapeToLeave } from "@/hooks/useFormKeys";
 import { stockShortfalls, latestPurchaseRates } from "@/lib/stock";
@@ -741,48 +744,18 @@ export function InvoiceForm({ mode, existing, initialDocType, fromEstimateId }: 
   // Called from the quick-add-item dialog once the cashier has actually
   // entered price/GST/unit — a name typed at the counter that doesn't match
   // any known item is never auto-created with blank/zero defaults anymore.
-  const confirmQuickAddItem = (details: {
-    name: string;
-    unit: string;
-    category: string;
-    gstRate: number;
-    salePrice: number;
-    purchasePrice: number;
-  }) => {
+  /** The item form (the Items page's own) created or picked an item: put it
+   *  where the person was standing when they asked for it. */
+  const placeQuickItem = (it: Item) => {
     if (!quickAddItem) return;
     const { rowId, replaceLineId } = quickAddItem;
     setQuickAddItem(null);
-    /** Put the item where the person was standing when they asked for it. */
-    const place = (it: Item) => {
-      if (replaceLineId) {
-        changeLineItem(replaceLineId, it);
-        return;
-      }
-      focusQtyId.current = addLineItem(it);
-      if (rowId) completePendingRow(rowId);
-    };
-    const existingMatch = items.find(
-      (i) => i.name.trim().toLowerCase() === details.name.trim().toLowerCase(),
-    );
-    if (existingMatch) {
-      place(existingMatch);
+    if (replaceLineId) {
+      changeLineItem(replaceLineId, it);
       return;
     }
-    const newItem = ItemRepo.add({
-      name: details.name.trim(),
-      unit: details.unit.trim() || "pcs",
-      gstRate: Math.max(0, details.gstRate),
-      purchasePrice: Math.max(0, details.purchasePrice),
-      salePrice: Math.max(0, details.salePrice),
-      /* Left off entirely when blank rather than stored as "": an item with
-         no category and an item categorised as nothing are the same thing to
-         the shop, and only one of them shows up in a category filter. */
-      ...(details.category.trim() ? { category: details.category.trim() } : {}),
-      stock: 0,
-      openingStock: 0,
-    }) as Item;
-    place(newItem);
-    toast.success(`New item added: ${newItem.name}`);
+    focusQtyId.current = addLineItem(it);
+    if (rowId) completePendingRow(rowId);
   };
 
   // Landed per-unit cost for an international purchase: convert the foreign
@@ -1573,34 +1546,13 @@ export function InvoiceForm({ mode, existing, initialDocType, fromEstimateId }: 
     setQuickAddParty({ name: partyName || `Party ${phone}`, phone, paid, andPrint });
   };
 
-  const confirmQuickAddParty = (details: QuickAddPartyDetails) => {
+  /** The party form (the Parties page's own) created — or found — the party
+   *  this bill is for: carry on saving the bill against it. */
+  const onQuickPartyCreated = (p: Party) => {
     if (!quickAddParty) return;
-    const name = details.name.trim() || quickAddParty.name;
-    const phone = details.phone.trim();
     const { paid, andPrint } = quickAddParty;
     setQuickAddParty(null);
-    // The name may have been EDITED inside the dialog — re-check so a
-    // same-phone or same-name party (any capitalisation) is reused, never
-    // duplicated. Mirrors confirmQuickAddItem.
-    const match =
-      (phone ? allParties.find((p) => (p.phone ?? "").trim() === phone) : undefined) ??
-      allParties.find((p) => p.name.trim().toLowerCase() === name.toLowerCase());
-    if (match) {
-      toast.info(`Using existing party: ${match.name}`);
-      finalizeSave({ id: match.id, name: match.name }, phone, paid, andPrint);
-      return;
-    }
-    const newParty: Party = {
-      id: genId(),
-      name,
-      type: "both",
-      phone: phone || undefined,
-      openingBalance: details.openingBalance || 0,
-      gstin: details.gstin.trim() || undefined,
-      creditLimit: details.creditLimit || undefined,
-      createdAt: new Date().toISOString(),
-    };
-    finalizeSave({ create: newParty }, phone, paid, andPrint);
+    finalizeSave({ id: p.id, name: p.name }, p.phone ?? "", paid, andPrint);
   };
 
   useEffect(() => {
@@ -2747,34 +2699,26 @@ export function InvoiceForm({ mode, existing, initialDocType, fromEstimateId }: 
         mode={mode}
         letterhead={company.printOnLetterhead ?? false}
       />
-      <QuickAddPartyDialog
-        draft={quickAddParty}
-        isSale={isSale}
-        existingParties={allParties}
-        onCancel={() => setQuickAddParty(null)}
-        onPickExisting={(p) => {
-          setQuickAddParty(null);
-          selectParty(p);
+      <PartyDialog
+        open={!!quickAddParty}
+        onOpenChange={(v) => {
+          if (!v) setQuickAddParty(null);
         }}
-        onConfirm={confirmQuickAddParty}
+        party={null}
+        initialName={quickAddParty?.name}
+        initialPhone={quickAddParty?.phone}
+        onSaved={() => {}}
+        onCreated={onQuickPartyCreated}
       />
-      <QuickAddItemDialog
-        draft={quickAddItem}
-        isSale={isSale}
-        existingItems={items}
-        onCancel={() => setQuickAddItem(null)}
-        onPickExisting={(it) => {
-          if (!quickAddItem) return;
-          // Same rule as confirmQuickAddItem: put it where they were standing.
-          if (quickAddItem.replaceLineId) {
-            changeLineItem(quickAddItem.replaceLineId, it);
-          } else {
-            focusQtyId.current = addLineItem(it);
-            if (quickAddItem.rowId) completePendingRow(quickAddItem.rowId);
-          }
-          setQuickAddItem(null);
+      <ItemDialog
+        open={!!quickAddItem}
+        onOpenChange={(v) => {
+          if (!v) setQuickAddItem(null);
         }}
-        onConfirm={confirmQuickAddItem}
+        item={null}
+        initialName={quickAddItem?.name}
+        onSaved={() => {}}
+        onCreated={placeQuickItem}
       />
     </div>
   );
@@ -3450,194 +3394,5 @@ function PriceHistoryCell({
           document.body,
         )}
     </>
-  );
-}
-
-function QuickAddItemDialog({
-  draft,
-  isSale,
-  existingItems = [],
-  onCancel,
-  onPickExisting,
-  onConfirm,
-}: {
-  draft: { name: string; rowId: string | null; replaceLineId?: string } | null;
-  isSale: boolean;
-  existingItems?: Item[];
-  onCancel: () => void;
-  onPickExisting?: (it: Item) => void;
-  onConfirm: (details: {
-    name: string;
-    unit: string;
-    category: string;
-    gstRate: number;
-    salePrice: number;
-    purchasePrice: number;
-  }) => void;
-}) {
-  const [name, setName] = useState("");
-  const [unit, setUnit] = useState(CompanyRepo.get().units?.[0] ?? "PCS");
-  const [category, setCategory] = useState("");
-  /* Straight off the catalogue this dialog is already handed, so the picker
-     offers exactly the categories in use and nothing has to be plumbed in. */
-  const knownCategories = useMemo(
-    () => existingItems.map((i) => i.category ?? "").filter(Boolean),
-    [existingItems],
-  );
-  const [gstRate, setGstRate] = useState(0);
-  const [salePrice, setSalePrice] = useState(0);
-  const [purchasePrice, setPurchasePrice] = useState(0);
-  const [nameOpen, setNameOpen] = useState(false);
-  const firstRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    if (draft) {
-      setName(draft.name);
-      setUnit(CompanyRepo.get().units?.[0] ?? "PCS");
-      setGstRate(0);
-      setSalePrice(0);
-      setPurchasePrice(0);
-      setNameOpen(false);
-      setTimeout(() => firstRef.current?.focus(), 50);
-    }
-  }, [draft]);
-
-  if (!draft) return null;
-
-  const submit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!name.trim()) {
-      toast.error("Name required");
-      return;
-    }
-    onConfirm({ name, unit, category, gstRate, salePrice, purchasePrice });
-  };
-
-  // Live "does this already exist?" hint — the name typed at the counter
-  // didn't exactly match anyone, but if they edit it here into something
-  // close to an existing item, flag it before a near-duplicate gets created.
-  const nameQ = name.trim().toLowerCase();
-  const similarItemsAll = nameQ
-    ? existingItems.filter((it) => it.name.trim().toLowerCase().includes(nameQ))
-    : [];
-  const similarItems = similarItemsAll.slice(0, 5);
-
-  return (
-    <Dialog open onOpenChange={(v) => !v && onCancel()}>
-      <DialogContent className="max-w-md">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <UserPlus className="h-4 w-4" />
-            New Item
-          </DialogTitle>
-        </DialogHeader>
-        <p className="text-[12px] text-muted-foreground -mt-2">
-          "{draft.name}" isn't in your items list yet — set its price & GST before adding it to this{" "}
-          {isSale ? "invoice" : "bill"}.
-        </p>
-        <form onSubmit={submit} className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <div className="sm:col-span-2 relative">
-            <Field
-              ref={firstRef}
-              label="Name *"
-              value={name}
-              onChange={(e) => {
-                setName(e.target.value);
-                setNameOpen(true);
-              }}
-              onFocus={() => setNameOpen(true)}
-              onBlur={() => setTimeout(() => setNameOpen(false), 150)}
-              autoComplete="off"
-            />
-            {nameOpen && similarItems.length > 0 && (
-              <div className="absolute z-30 top-full left-0 right-0 mt-1 border rounded-md bg-popover shadow-elevated max-h-52 overflow-auto">
-                <div className="px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wide text-amber-600 bg-amber-50 border-b flex items-center gap-1.5">
-                  <AlertTriangle className="h-3 w-3" />
-                  {similarItemsAll.length === 1 ? "Similar item exists" : "Similar items exist"} —
-                  click to use it instead
-                </div>
-                {similarItems.map((it) => (
-                  <div
-                    key={it.id}
-                    onMouseDown={(e) => {
-                      e.preventDefault();
-                      onPickExisting?.(it);
-                      setNameOpen(false);
-                    }}
-                    className="px-3 py-2 text-sm cursor-pointer hover:bg-accent flex items-center justify-between"
-                  >
-                    <span className="font-medium">{it.name}</span>
-                    <span className="text-[11px] text-muted-foreground">
-                      Stock: {it.stock} {it.unit}
-                    </span>
-                  </div>
-                ))}
-                {similarItemsAll.length > similarItems.length && (
-                  <div className="px-3 py-1.5 text-[11px] text-muted-foreground border-t">
-                    +{similarItemsAll.length - similarItems.length} more match
-                    {similarItemsAll.length - similarItems.length > 1 ? "es" : ""}
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-          <label className="flex flex-col gap-1 text-[12px]">
-            <span className="text-muted-foreground font-medium">Unit</span>
-            <ComboInput
-              value={unit}
-              onValue={setUnit}
-              options={CompanyRepo.get().units ?? []}
-              ariaLabel="Unit"
-              className="h-9 px-3 border rounded-md bg-background outline-none focus:border-primary focus:ring-1 focus:ring-primary"
-            />
-          </label>
-          {/* A searchable picker rather than a free text box, for the reason
-              the bulk grid gives: this is the moment a third spelling of a
-              category that already exists gets invented. An item created
-              here used to have no category at all, which is worse — it
-              simply never appears under any of them. */}
-          <label className="flex flex-col gap-1 text-[12px]">
-            <span className="text-muted-foreground font-medium">Category</span>
-            <ComboInput
-              value={category}
-              onValue={setCategory}
-              options={knownCategories}
-              placeholder="Search or add…"
-              ariaLabel="Category for the new item"
-              className="h-9 px-3 border rounded-md bg-background focus:border-primary focus:ring-2 focus:ring-ring/20 outline-none text-[13px] w-full"
-            />
-          </label>
-          <NumField
-            label="GST Rate (%)"
-            value={gstRate}
-            onValue={(n) => setGstRate(Math.max(0, n))}
-          />
-          <NumField
-            label={isSale ? "Sale Price *" : "Purchase Price *"}
-            value={isSale ? salePrice : purchasePrice}
-            onValue={(n) => {
-              const v = Math.max(0, n);
-              if (isSale) setSalePrice(v);
-              else setPurchasePrice(v);
-            }}
-          />
-          <NumField
-            label={isSale ? "Purchase Price" : "Sale Price"}
-            value={isSale ? purchasePrice : salePrice}
-            onValue={(n) => {
-              const v = Math.max(0, n);
-              if (isSale) setPurchasePrice(v);
-              else setSalePrice(v);
-            }}
-          />
-          <div className="sm:col-span-2 flex justify-end gap-2 mt-2">
-            <Button type="button" variant="outline" onClick={onCancel}>
-              Cancel
-            </Button>
-            <Button type="submit">Add & Continue</Button>
-          </div>
-        </form>
-      </DialogContent>
-    </Dialog>
   );
 }

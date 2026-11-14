@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { matchesQuery, byRelevance } from "@/lib/search";
 import { useHighlightScroll } from "@/hooks/useHighlightScroll";
 import type { Item } from "@/types";
+import { ItemDialog } from "@/routes/items";
 
 const KIND_LABEL: Record<string, string> = { raw: "Raw", finished: "Finished" };
 
@@ -14,8 +15,11 @@ const KIND_LABEL: Record<string, string> = { raw: "Raw", finished: "Finished" };
  * real item by id — two items can share a name, and a typed name that matches
  * nothing must not quietly become a "new" material. So: same keyboard and
  * portal behaviour as ComboInput (see its comments for why the list portals
- * into the dialog), but the value is an item id and there is no "Add" row.
- * Leaving the box without choosing puts the chosen item's name back.
+ * into the dialog), but the value is an item id. A typed name never becomes
+ * an item by itself: with `allowAdd`, the last row "+ Add new item" opens
+ * the Items page's own form (the one form for items across the app), and the
+ * item it saves is chosen here. Leaving the box without choosing puts the
+ * chosen item's name back.
  */
 export function ItemPicker({
   value,
@@ -25,6 +29,8 @@ export function ItemPicker({
   className,
   ariaLabel,
   autoFocus,
+  allowAdd,
+  newItemKind,
 }: {
   /** The chosen item's id, or "" for none. */
   value: string;
@@ -34,11 +40,16 @@ export function ItemPicker({
   className?: string;
   ariaLabel?: string;
   autoFocus?: boolean;
+  /** Offer "+ Add new item", opening the full item form. */
+  allowAdd?: boolean;
+  /** Item type the new item starts as (raw material, finished good). */
+  newItemKind?: Item["kind"];
 }) {
   const chosen = items.find((i) => i.id === value);
   const [text, setText] = useState(chosen?.name ?? "");
   const [open, setOpen] = useState(false);
   const [idx, setIdx] = useState(0);
+  const [adding, setAdding] = useState<string | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
   useHighlightScroll(listRef, idx, open);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -108,6 +119,14 @@ export function ItemPicker({
     setText(item.name);
     setOpen(false);
   };
+  // The add row sits after the matches, so ↓/Enter reach it like any row.
+  const exact = rows.some((i) => i.name.trim().toLowerCase() === typed.toLowerCase());
+  const showAdd = !!allowAdd && !(searching && exact);
+  const addIdx = rows.length;
+  const startAdd = () => {
+    setOpen(false);
+    setAdding(searching ? typed : "");
+  };
 
   return (
     <>
@@ -144,13 +163,16 @@ export function ItemPicker({
           if (e.key === "ArrowDown") {
             e.preventDefault();
             setOpen(true);
-            setIdx((i) => Math.min(rows.length - 1, i + 1));
+            setIdx((i) => Math.min(rows.length - (showAdd ? 0 : 1), i + 1));
           } else if (e.key === "ArrowUp") {
             e.preventDefault();
             setIdx((i) => Math.max(0, i - 1));
           } else if (e.key === "Enter" && open && rows[idx]) {
             e.preventDefault();
             commit(rows[idx]);
+          } else if (e.key === "Enter" && open && showAdd && idx === addIdx) {
+            e.preventDefault();
+            startAdd();
           } else if (e.key === "Escape" && open) {
             e.preventDefault();
             e.stopPropagation();
@@ -175,7 +197,7 @@ export function ItemPicker({
             ref={listRef}
             className="z-50 border rounded-md bg-popover shadow-elevated max-h-60 overflow-auto"
           >
-            {rows.length === 0 ? (
+            {rows.length === 0 && !showAdd ? (
               <div className="px-2.5 py-2 text-[12px] text-muted-foreground">
                 No item matches — add it on the Items page first
               </div>
@@ -207,9 +229,42 @@ export function ItemPicker({
                 </div>
               ))
             )}
+            {showAdd && (
+              <div
+                data-opt={addIdx}
+                role="option"
+                aria-selected={idx === addIdx}
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  startAdd();
+                }}
+                onMouseEnter={() => setIdx(addIdx)}
+                className={`px-2.5 py-1.5 text-[13px] cursor-pointer border-t text-primary font-medium ${
+                  idx === addIdx ? "bg-accent" : "hover:bg-accent"
+                }`}
+              >
+                + Add new item{searching ? ` "${typed}"` : ""}
+              </div>
+            )}
           </div>,
           portalTarget,
         )}
+      {allowAdd && (
+        <ItemDialog
+          open={adding !== null}
+          onOpenChange={(v) => {
+            if (!v) setAdding(null);
+          }}
+          item={null}
+          initialName={adding ?? undefined}
+          initialKind={newItemKind}
+          onSaved={() => {}}
+          onCreated={(it) => {
+            setAdding(null);
+            commit(it);
+          }}
+        />
+      )}
     </>
   );
 }

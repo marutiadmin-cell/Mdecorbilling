@@ -606,16 +606,35 @@ export function StockAdjustDialog({
   );
 }
 
+/**
+ * THE item form — the same one wherever an item is created or edited: the
+ * Items page, an item's own page, a sale/purchase/quotation line, a BOM or a
+ * production run. A bill used to open its own cut-down "quick add" form, so
+ * an item made at the counter missed the fields the Items page asks for
+ * (HSN, item type, opening stock, min stock…) and the two drifted apart.
+ *
+ * Opened from another form: `initialName` is what was typed there, and
+ * `onCreated` hands the new item back so that form can use it at once. If
+ * the name turns out to exist already, that item is handed back instead of
+ * refusing — the person wanted that item, not a duplicate.
+ */
 export function ItemDialog({
   open,
   onOpenChange,
   item,
   onSaved,
+  initialName,
+  initialKind,
+  onCreated,
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
   item: Item | null;
   onSaved: () => void;
+  initialName?: string;
+  /** Pre-select the item type — a BOM's material is raw, what it makes finished. */
+  initialKind?: Item["kind"];
+  onCreated?: (item: Item) => void;
 }) {
   const firstRef = useRef<HTMLInputElement>(null);
   const [f, setF] = useState<Partial<Item>>({});
@@ -638,6 +657,8 @@ export function ItemDialog({
     if (open) {
       setF(
         item ?? {
+          name: initialName?.trim() || undefined,
+          ...(initialKind && initialKind !== "trading" ? { kind: initialKind } : {}),
           unit: "pcs",
           gstRate: 0,
           purchasePrice: 0,
@@ -651,6 +672,7 @@ export function ItemDialog({
       setNameOpen(false);
       setTimeout(() => firstRef.current?.focus(), 50);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, item]);
 
   const save = (e: React.FormEvent) => {
@@ -665,6 +687,13 @@ export function ItemDialog({
       (x) => x.name.trim().toLowerCase() === f.name!.trim().toLowerCase() && x.id !== item?.id,
     );
     if (dup) {
+      if (!item && onCreated) {
+        // Opened from a bill/BOM: they wanted this item — use it.
+        toast.info(`Using existing item: ${dup.name}`);
+        onCreated(dup);
+        onOpenChange(false);
+        return;
+      }
       toast.error(`Item "${dup.name}" already exists — repeat items cannot be added`);
       return;
     }
@@ -691,7 +720,7 @@ export function ItemDialog({
           : "Item updated",
       );
     } else {
-      ItemRepo.add({
+      const created = ItemRepo.add({
         ...f,
         name: f.name!,
         unit: f.unit ?? "pcs",
@@ -702,6 +731,7 @@ export function ItemDialog({
         stock: f.openingStock ?? 0,
         openingStock: f.openingStock ?? 0,
       });
+      onCreated?.(created as Item);
       toast.success("Item created");
     }
     onSaved();
