@@ -229,7 +229,9 @@ function DaybookPage() {
       list.push({
         created: p.createdAt,
         type: p.type === "in" ? "Payment In" : "Payment Out",
-        ref: p.allocations?.map((a) => a.number).join(", ") || p.ref || "—",
+        ref:
+          (p.allocations?.map((a) => a.number).join(", ") || p.ref || "—") +
+          (p.reference ? ` · ${p.reference}` : ""),
         party: p.partyName,
         mode: p.mode,
         bankId: p.bankId,

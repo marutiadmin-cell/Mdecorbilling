@@ -978,7 +978,10 @@ export function buildPartyStatement(
     });
   }
   for (const pay of data.payments.filter((x) => x.partyId === party.id)) {
-    const against = pay.allocations?.map((a) => a.number).join(", ") || pay.ref || "Advance";
+    // The cheque no. / UTR the customer quotes, beside the bills it settled.
+    const against =
+      (pay.allocations?.map((a) => a.number).join(", ") || pay.ref || "Advance") +
+      (pay.reference ? ` · ${pay.reference}` : "");
     if (pay.amount > 0.001) {
       entries.push({
         date: pay.date,

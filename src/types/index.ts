@@ -504,7 +504,13 @@ export interface Payment {
   bankId?: ID;
   /** Set only when this was not all taken one way. See PaymentSplit. */
   splits?: PaymentSplit[];
+  /** LEGACY: invoice numbers this payment settled, from before allocations
+   *  existed (see allocatedAmount). Never typed by a person — use `reference`. */
   ref?: string;
+  /** What the bank or the customer calls this money — cheque no., UTR,
+   *  UPI transaction id. Free text, shown and searched, never parsed. */
+  reference?: string;
+  notes?: string;
   allocations?: PaymentAllocation[];
   /**
    * The proforma this advance was taken against.

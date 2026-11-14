@@ -6220,6 +6220,158 @@ async function runAll(): Promise<Results> {
     has(after, "HDFC Car Loan", "rename: the loan shows under its new name");
   }
 
+  /* ── The standard receipt: amount first, bills against it, rest on account ──
+     Tally / Zoho: the amount received is the receipt; the bills it settles
+     come out of it; whatever they do not take is an advance. Before this,
+     bill-by-bill mode made the amount whatever the ticked bills added up to,
+     so an advance could not be recorded there — and EDITING a receipt that
+     had one silently cut it off. Driven through the real Payments page. */
+  {
+    PartyRepo.add({
+      id: "PSP",
+      name: "Standard Flow Customer",
+      type: "customer",
+      openingBalance: 0,
+      createdAt: "2026-01-01T00:00:00Z",
+    } as never);
+    SalesRepo.add({
+      id: "PSS1",
+      number: "INV-PS1",
+      date: D2,
+      partyId: "PSP",
+      partyName: "Standard Flow Customer",
+      lineItems: [],
+      subtotal: 20000,
+      discount: 0,
+      taxAmount: 0,
+      total: 20000,
+      paid: 0,
+      paymentMode: "credit",
+    } as never);
+    const amountBox = () =>
+      currentDialog().querySelector('input[aria-label="Amount received"]') as HTMLInputElement;
+    const click = async (el: Element | null | undefined) => {
+      await act(async () => {
+        (el as HTMLElement | null)?.click();
+      });
+      await settleMs(120);
+    };
+    const pickParty = async (typed: string, name: string) => {
+      const box = currentDialog().querySelector(
+        'input[placeholder="Type to search party…"]',
+      ) as HTMLInputElement;
+      await act(async () => setInput(box, typed));
+      await settleMs(80);
+      const opt = Array.from(document.querySelectorAll("div"))
+        .filter((d) => d.textContent === name)
+        .pop();
+      await act(async () => {
+        opt?.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+      });
+      await settleMs(150);
+    };
+    const mine = () => PaymentRepo.all().filter((p) => p.partyId === "PSP");
+
+    // 1. Bill-by-bill: tick the bill, then say 25,000 actually came in.
+    await renderRoute("/payments");
+    await click(findButton(/Receive Payment/));
+    await pickParty("Standard Flow", "Standard Flow Customer");
+    await click(findButton(/Adjust invoice by invoice/));
+    const num = Array.from(currentDialog().querySelectorAll("span")).find(
+      (s) => s.textContent === "INV-PS1",
+    );
+    await click(num?.closest('[class*="border-b"]')?.querySelector("button"));
+    assert(
+      amountBox()?.value === "20000",
+      `receipt: ticking the bill fills the amount (got ${amountBox()?.value})`,
+    );
+    await act(async () => setInput(amountBox(), "25000"));
+    await settleMs(100);
+    has(
+      currentDialog().textContent ?? "",
+      "Advance (on account)",
+      "receipt: the 5,000 the bill does not take is shown as advance",
+    );
+    await act(async () =>
+      setInput(
+        currentDialog().querySelector('input[aria-label="Payment reference"]') as HTMLInputElement,
+        "UTR123",
+      ),
+    );
+    await act(async () =>
+      setInput(
+        currentDialog().querySelector('input[aria-label="Payment notes"]') as HTMLInputElement,
+        "Advance for sofa",
+      ),
+    );
+    await click(currentDialog().querySelector('[data-mode="cash"]'));
+    await click(findButton(/Confirm Receipt/));
+    await settleMs(200);
+    const saved = mine()[0];
+    assert(saved?.amount === 25000, `receipt: 25,000 recorded, got ${saved?.amount}`);
+    assert(
+      saved?.allocations?.[0]?.amount === 20000,
+      `receipt: 20,000 against the bill, got ${saved?.allocations?.[0]?.amount}`,
+    );
+    assert(SalesRepo.get("PSS1")?.paid === 20000, "receipt: the bill is paid off");
+    assert(
+      saved?.reference === "UTR123" && saved?.notes === "Advance for sofa",
+      `receipt: reference and notes saved (${saved?.reference} / ${saved?.notes})`,
+    );
+
+    // 2. Edit it and save unchanged — nothing may be lost.
+    const listed = await renderRoute("/payments");
+    has(listed, "UTR123", "payments list: shows the reference");
+    const row = Array.from(document.querySelectorAll("tr")).find((r) =>
+      (r.textContent ?? "").includes("Standard Flow Customer"),
+    );
+    await click(row?.querySelector('button[title="Edit payment"]'));
+    assert(
+      amountBox()?.value === "25000",
+      `edit: opens with the amount recorded (got ${amountBox()?.value})`,
+    );
+    await click(findButton(/Confirm Receipt/));
+    await settleMs(200);
+    const edited = PaymentRepo.get(saved!.id);
+    assert(edited?.amount === 25000, `edit: still 25,000, got ${edited?.amount}`);
+    assert(edited?.allocations?.[0]?.amount === 20000, "edit: still 20,000 against the bill");
+    assert(SalesRepo.get("PSS1")?.paid === 20000, "edit: the bill is not paid twice");
+    assert(edited?.reference === "UTR123", "edit: the reference is kept");
+
+    // 3. Lowering the amount below what the bills take is refused.
+    await renderRoute("/payments");
+    const row2 = Array.from(document.querySelectorAll("tr")).find((r) =>
+      (r.textContent ?? "").includes("Standard Flow Customer"),
+    );
+    await click(row2?.querySelector('button[title="Edit payment"]'));
+    await act(async () => setInput(amountBox(), "15000"));
+    await settleMs(100);
+    await click(findButton(/Confirm Receipt/));
+    await settleMs(200);
+    assert(
+      PaymentRepo.get(saved!.id)?.amount === 25000,
+      "edit: an amount below what the bills take is refused, nothing changes",
+    );
+
+    // 4. A brand-new party typed by name, amount entered, saves.
+    await renderRoute("/payments");
+    await click(findButton(/Receive Payment/));
+    const box = currentDialog().querySelector(
+      'input[placeholder="Type to search party…"]',
+    ) as HTMLInputElement;
+    await act(async () => setInput(box, "Walk In Buyer Zed"));
+    await settleMs(80);
+    await act(async () => setInput(amountBox(), "1000"));
+    await settleMs(80);
+    await click(currentDialog().querySelector('[data-mode="cash"]'));
+    await click(findButton(/Confirm Receipt/));
+    await settleMs(200);
+    assert(
+      PaymentRepo.all().some((p) => p.partyName === "Walk In Buyer Zed" && p.amount === 1000),
+      "receipt: a new party typed by name with an amount is saved",
+    );
+  }
+
   if (root) root.unmount();
   if (host) host.remove();
   return R;

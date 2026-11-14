@@ -117,7 +117,7 @@ function PaymentsPage() {
     if (tab !== "all" && r.type !== tab) return false;
     if (search) {
       const q = search.toLowerCase();
-      if (!matchesQuery(q, r.partyName, r.ref)) return false;
+      if (!matchesQuery(q, r.partyName, r.ref, r.reference, r.notes)) return false;
     }
     return true;
   });
@@ -246,7 +246,13 @@ function PaymentsPage() {
       label: "Reference",
       render: (r) => (
         <span className="font-mono text-gray-500">
-          {r.ref && (r.allocations?.length || !r.ref.match(/^(INV|PUR)-/)) ? r.ref : "—"}
+          {r.reference ||
+            (r.ref && (r.allocations?.length || !r.ref.match(/^(INV|PUR)-/)) ? r.ref : "—")}
+          {r.notes && (
+            <span className="block font-sans text-[11px] text-gray-400 truncate max-w-56">
+              {r.notes}
+            </span>
+          )}
         </span>
       ),
     },
@@ -623,7 +629,12 @@ export function ReceivePaymentDialog({
   const bankListRef = useRef<HTMLDivElement>(null);
   useHighlightScroll(bankListRef, bankIdx, bankOpen);
   const [applyRows, setApplyRows] = useState<ApplyRow[]>([]);
-  const [manualAmount, setManualAmount] = useState(0);
+  /** Whether the person typed the amount themselves. Until they do, ticking
+   *  bills in bill-by-bill mode fills it in; once they have, it is theirs —
+   *  whatever the bills do not take is kept as an advance. */
+  const [amountTouched, setAmountTouched] = useState(false);
+  const [reference, setReference] = useState("");
+  const [notes, setNotes] = useState("");
   const [saving, setSaving] = useState(false);
   const savingRef = useRef(false);
 
@@ -683,9 +694,13 @@ export function ReceivePaymentDialog({
            worse — it moved somewhere nobody asked it to go. */
         setSplitRows(editing.splits?.length ? editing.splits : null);
         setBankQ(BankRepo.all().find((b) => b.id === editing.bankId)?.name ?? "");
-        setManualAmount(editing.allocations?.length ? 0 : editing.amount);
         setAllocMode("manual");
+        // The amount recorded is the amount — never re-derived from what
+        // happens to be applied to bills, or an advance part is lost on edit.
         setPayAmount(editing.amount);
+        setAmountTouched(true);
+        setReference(editing.reference ?? "");
+        setNotes(editing.notes ?? "");
         setPayDiscount(r2((editing.allocations ?? []).reduce((s, a) => s + (a.discount ?? 0), 0)));
       } else {
         setPartyQ(presetParty?.name ?? "");
@@ -695,9 +710,11 @@ export function ReceivePaymentDialog({
         setModeChosen(false);
         setBankId("");
         setBankQ("");
-        setManualAmount(0);
         setAllocMode("auto");
         setPayAmount(0);
+        setAmountTouched(false);
+        setReference("");
+        setNotes("");
         setPayDiscount(0);
         /* With the party already known there is nothing to type there, and
            landing on a pre-filled search box invites the first keystroke to
@@ -857,8 +874,17 @@ export function ReceivePaymentDialog({
   // of it that happened to land on a bill: hand over 25,000 against 20,000 of
   // open bills and the extra 5,000 is a real advance that must be recorded,
   // not quietly dropped from the receipt.
-  const effectiveAmount =
-    allocMode === "auto" ? payAmount : totalApplied > 0 ? totalApplied : manualAmount;
+  // The amount received is ALWAYS the amount typed (or, in bill-by-bill mode
+  // before anything is typed, what the ticked bills add up to) — the
+  // standard receipt: money in, set against bills, the rest on account.
+  const effectiveAmount = payAmount;
+  const overApplied = r2(totalApplied - payAmount) > 0.005;
+  // Bill-by-bill, before an amount is typed: the amount is what the ticked
+  // bills take — ticking three bills means "received this much for them".
+  useEffect(() => {
+    if (allocMode === "manual" && !amountTouched && payAmount !== totalApplied)
+      setPayAmount(totalApplied);
+  }, [allocMode, amountTouched, totalApplied, payAmount]);
   const advanceLeft = Math.max(0, r2(payAmount - totalApplied));
   const unusedDiscount = Math.max(0, r2(payDiscount - totalDiscount));
 
@@ -933,6 +959,13 @@ export function ReceivePaymentDialog({
        wrong place, and the ledger has no way of knowing it was never a
        decision. A split says where every rupee went by construction, so it
        needs no separate answer here. */
+    if (overApplied) {
+      toast.error(
+        `${fmtMoney(totalApplied)} is set against ${isIn ? "invoices" : "bills"}, but only ${fmtMoney(payAmount)} was ${isIn ? "received" : "paid"} — raise the amount or lower what each ${isIn ? "invoice" : "bill"} gets`,
+        { duration: 8000 },
+      );
+      return;
+    }
     if (!splitRows && !modeChosen) {
       toast.error("Choose how the money moved — Cash or Bank");
       return;
@@ -1080,6 +1113,8 @@ export function ReceivePaymentDialog({
           bankId: splitRows?.length ? undefined : mode === "bank" ? bankId : undefined,
           splits: splitRows?.length ? splitRows : undefined,
           allocations: allocations.length ? allocations : undefined,
+          reference: reference.trim() || undefined,
+          notes: notes.trim() || undefined,
           // Clear any legacy `ref` — its application was just reversed above,
           // so leaving it would double-count on the NEXT edit/delete and show
           // a stale linked-invoice list. The record is now allocations-based.
@@ -1097,6 +1132,8 @@ export function ReceivePaymentDialog({
           bankId: splitRows?.length ? undefined : mode === "bank" ? bankId : undefined,
           splits: splitRows?.length ? splitRows : undefined,
           allocations: allocations.length ? allocations : undefined,
+          reference: reference.trim() || undefined,
+          notes: notes.trim() || undefined,
           createdAt: new Date().toISOString(),
         };
         PaymentRepo.addBatched(batch, payment);
@@ -1260,6 +1297,7 @@ export function ReceivePaymentDialog({
                             type="button"
                             onClick={() => {
                               setPayAmount(r2(Math.max(0, totalDue - payDiscount)));
+                              setAmountTouched(true);
                             }}
                             className="text-[11px] font-semibold text-blue-600 hover:underline"
                           >
@@ -1269,7 +1307,10 @@ export function ReceivePaymentDialog({
                       </span>
                       <NumInput
                         value={payAmount}
-                        onValue={setPayAmount}
+                        onValue={(n) => {
+                          setPayAmount(n);
+                          setAmountTouched(true);
+                        }}
                         // The visible label wraps a "Full ₹x" shortcut too, so
                         // spell the accessible name out rather than letting it
                         // read as "Amount Received Full ₹20,500".
@@ -1399,6 +1440,46 @@ export function ReceivePaymentDialog({
               )}
               {allocMode === "manual" && applyRows.length > 0 && (
                 <div className="space-y-2">
+                  {/* The standard receipt: the amount received comes first;
+                      the bills below say what it settles, and anything they
+                      do not take is kept as an advance (on account). */}
+                  <label className="block">
+                    <span className="text-[12px] font-semibold text-gray-600 block mb-1">
+                      {isIn ? "Amount Received" : "Amount Paid"} (₹) *
+                    </span>
+                    <NumInput
+                      value={payAmount}
+                      onValue={(n) => {
+                        setPayAmount(n);
+                        setAmountTouched(true);
+                      }}
+                      aria-label={isIn ? "Amount received" : "Amount paid"}
+                      placeholder="0.00"
+                      className={`w-full h-11 px-3 border-2 rounded-md text-right font-bold text-lg outline-none focus:border-primary bg-white tabular-nums ${overApplied ? "border-rose-400" : ""} ${isIn ? "text-emerald-700" : "text-rose-700"}`}
+                    />
+                  </label>
+                  <div className="flex flex-wrap gap-x-4 gap-y-1 text-[11.5px]">
+                    <span className="text-gray-600">
+                      Set against {isIn ? "invoices" : "bills"}:{" "}
+                      <b className="tabular-nums">{fmtMoney(totalApplied)}</b>
+                    </span>
+                    {totalDiscount > 0 && (
+                      <span className="text-amber-700">
+                        Discount: <b className="tabular-nums">{fmtMoney(totalDiscount)}</b>
+                      </span>
+                    )}
+                    {overApplied ? (
+                      <span className="text-rose-600 font-semibold">
+                        {fmtMoney(r2(totalApplied - payAmount))} more than the amount
+                      </span>
+                    ) : (
+                      advanceLeft > 0.01 && (
+                        <span className="text-blue-700 font-semibold">
+                          Advance (on account): {fmtMoney(advanceLeft)}
+                        </span>
+                      )
+                    )}
+                  </div>
                   <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide">
                     {applyRows.length} Open {isIn ? "Invoice" : "Bill"}
                     {applyRows.length > 1 ? "s" : ""} — select to settle:
@@ -1511,14 +1592,18 @@ export function ReceivePaymentDialog({
               {/* Manual amount — shown whenever nothing is applied to an invoice
                   yet, whether because there are none or none are checked. Quick
                   entry has its own amount box, so this is bill-by-bill only. */}
-              {allocMode === "manual" && totalApplied === 0 && (
+              {allocMode === "manual" && applyRows.length === 0 && (
                 <div className="mt-3">
                   <label className="text-[12px] font-semibold text-gray-600 block mb-1">
-                    {applyRows.length > 0 ? "Or record as advance (₹)" : "Amount (₹) *"}
+                    Amount (₹) *
                   </label>
                   <NumInput
-                    value={manualAmount}
-                    onValue={setManualAmount}
+                    value={payAmount}
+                    onValue={(n) => {
+                      setPayAmount(n);
+                      setAmountTouched(true);
+                    }}
+                    aria-label={isIn ? "Amount received" : "Amount paid"}
                     className={`w-full h-9 px-3 border-2 rounded-md text-right font-bold text-lg outline-none focus:border-primary ${isIn ? "text-emerald-700" : "text-rose-700"}`}
                     placeholder="0.00"
                   />
@@ -1534,8 +1619,12 @@ export function ReceivePaymentDialog({
                 Amount (₹) *
               </label>
               <NumInput
-                value={manualAmount}
-                onValue={setManualAmount}
+                value={payAmount}
+                onValue={(n) => {
+                  setPayAmount(n);
+                  setAmountTouched(true);
+                }}
+                aria-label={isIn ? "Amount received" : "Amount paid"}
                 className={`w-full h-9 px-3 border-2 rounded-md text-right font-bold text-lg outline-none focus:border-primary ${isIn ? "text-emerald-700" : "text-rose-700"}`}
                 placeholder="0.00"
               />
@@ -1570,6 +1659,33 @@ export function ReceivePaymentDialog({
                 />
               </div>
             </div>
+          </div>
+
+          {/* What the bank or the customer calls this money — the cheque no.,
+              UTR or UPI id the shop matches the statement against — and why. */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <label className="flex flex-col gap-1 text-[12px]">
+              <span className="font-semibold text-gray-600">
+                Reference (cheque / UTR / txn no.)
+              </span>
+              <input
+                value={reference}
+                onChange={(e) => setReference(e.target.value)}
+                aria-label="Payment reference"
+                placeholder="Optional"
+                className="h-8 px-2 border rounded bg-white focus:border-primary outline-none text-sm"
+              />
+            </label>
+            <label className="flex flex-col gap-1 text-[12px]">
+              <span className="font-semibold text-gray-600">Notes</span>
+              <input
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                aria-label="Payment notes"
+                placeholder="Optional"
+                className="h-8 px-2 border rounded bg-white focus:border-primary outline-none text-sm"
+              />
+            </label>
           </div>
 
           {/* Offered only when there is money to divide. */}
@@ -1678,9 +1794,11 @@ export function ReceivePaymentDialog({
           >
             <div>
               <p className="text-xs text-gray-500 font-medium">
-                {applyRows.some((r) => r.checked)
-                  ? `Applied to ${applyRows.filter((r) => r.checked).length} ${isIn ? "invoice" : "bill"}${applyRows.filter((r) => r.checked).length > 1 ? "s" : ""}`
-                  : "General payment (advance)"}
+                {applyRows.some((r) => r.checked) && advanceLeft > 0.01
+                  ? `Against ${applyRows.filter((r) => r.checked).length} ${isIn ? "invoice(s)" : "bill(s)"} + ${fmtMoney(advanceLeft)} advance`
+                  : applyRows.some((r) => r.checked)
+                    ? `Applied to ${applyRows.filter((r) => r.checked).length} ${isIn ? "invoice" : "bill"}${applyRows.filter((r) => r.checked).length > 1 ? "s" : ""}`
+                    : "General payment (advance / on account)"}
               </p>
               <p
                 className={`text-[22px] font-extrabold tabular-nums ${isIn ? "text-emerald-700" : "text-rose-700"}`}
