@@ -849,6 +849,17 @@ export function buildDemoShop(
     const it = items.find((x) => x.id === corr.id);
     if (it) it.stock = corr.correct;
   }
+  // No real shop runs most of its catalogue below zero. Random sales and
+  // production outran random purchases for many items (slats ended at −439),
+  // so give each such item enough OPENING stock to cover what it sold, plus
+  // some to spare. Opening + movements = stock still holds exactly.
+  for (const it of items) {
+    const st = Number(it.stock);
+    if (!(st < 0)) continue;
+    const top = Math.ceil(-st + Math.max(5, -st * 0.25));
+    it.openingStock = r2((Number(it.openingStock) || 0) + top);
+    it.stock = r2(st + top);
+  }
   for (const a of planDataRepair(data()).accounts) {
     const bank = banks.find((x) => x.id === a.id);
     if (bank) bank.balance = a.correct;
