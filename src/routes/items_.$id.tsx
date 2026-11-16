@@ -8,6 +8,7 @@ import {
   SaleReturnRepo,
   PurchaseReturnRepo,
   StockAdjustmentRepo,
+  PieceSortRepo,
   ProductionRepo,
 } from "@/repositories";
 import { fmtDate, fmtDateShort, fmtMoney } from "@/lib/format";
@@ -19,6 +20,8 @@ import { averageCostMap, costOf, saleCostMap, stockValueOf } from "@/lib/finData
 import { lineCostKey } from "@/lib/stockValuation";
 import { useRepoData, useRepoMemo } from "@/hooks/useRepoData";
 import type { Item, Invoice, Return } from "@/types";
+import { PiecesCard } from "@/components/PiecesCard";
+import { piecesLabel } from "@/lib/pieces";
 import {
   ArrowLeft,
   Package,
@@ -155,11 +158,32 @@ function ItemDetailPage() {
       entries.push({
         date: a.date,
         created: a.createdAt,
-        type: a.type === "add" ? "Stock Added" : "Stock Reduced",
-        ref: a.reason || "Adjustment",
+        type:
+          a.kind === "wastage"
+            ? "Cutting wastage"
+            : a.type === "add"
+              ? "Stock Added"
+              : "Stock Reduced",
+        ref:
+          (a.reason || "Adjustment") +
+          (a.pieces?.length ? ` — ${piecesLabel(a.pieces, item?.unit ?? "")}` : ""),
         party: "—",
         qtyIn: a.type === "add" ? a.qty : 0,
         qtyOut: a.type === "reduce" ? a.qty : 0,
+        rate: null,
+      });
+    }
+    // Sorting into sizes moves no stock, but belongs in the item's story.
+    for (const srt of PieceSortRepo.all()) {
+      if (srt.itemId !== id) continue;
+      entries.push({
+        date: srt.date,
+        created: srt.createdAt,
+        type: "Sorted into sizes",
+        ref: piecesLabel(srt.pieces, item?.unit ?? "") + (srt.note ? ` — ${srt.note}` : ""),
+        party: "—",
+        qtyIn: 0,
+        qtyOut: 0,
         rate: null,
       });
     }
@@ -189,7 +213,15 @@ function ItemDetailPage() {
           date: p.date,
           created: p.createdAt,
           type: "Consumed",
-          ref: `${p.number} — ${p.finishedItemName}`,
+          ref: (() => {
+            // By-length materials: which pieces the run cut from.
+            const cut = p.cuts?.find((x) => x.itemId === id);
+            const u = item?.unit ?? "";
+            const extra = cut
+              ? ` — cut ${piecesLabel(cut.cuts, u)} from ${cut.taken.length ? piecesLabel(cut.taken, u) : "unsorted"}${cut.returned.length ? `; kept ${piecesLabel(cut.returned, u)}` : ""}`
+              : "";
+            return `${p.number} — ${p.finishedItemName}${extra}`;
+          })(),
           party: "—",
           qtyIn: 0,
           qtyOut: c.qty,
@@ -327,6 +359,7 @@ function ItemDetailPage() {
 
       {/* History */}
       <div className="flex-1 overflow-auto p-5">
+        {item.pieces && <PiecesCard item={item} editAllowed={editAllowed} />}
         <div className="bg-white border rounded-lg shadow-sm overflow-hidden max-w-5xl mx-auto flex flex-col">
           <div className="px-5 py-3 border-b">
             <p className="text-sm font-bold text-gray-800">Transaction History</p>

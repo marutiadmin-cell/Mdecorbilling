@@ -23,6 +23,7 @@ import type {
   JournalVoucher,
   Bom,
   Production,
+  PieceSort,
   BsAccount,
   FinConfig,
 } from "@/types";
@@ -54,6 +55,8 @@ export const JournalVoucherRepo = new Repository<JournalVoucher>("journal-vouche
    src/lib/production.ts. */
 export const BomRepo = new Repository<Bom>("boms");
 export const ProductionRepo = new Repository<Production>("productions");
+/* By-length stock put into sizes without moving it (lib/pieces.ts). */
+export const PieceSortRepo = new Repository<PieceSort>("piece-sorts");
 /* The balance-sheet register — owner-only, read by the financial
    statements. Deliberately absent from MODULE_REPOS: only the owner's
    device loads it (see firestore.rules). FinConfig is one document, id
@@ -321,6 +324,7 @@ export const REPO_BY_KEY: Record<string, Repository<{ id: string }>> = {
   "bz.journal-vouchers": JournalVoucherRepo as Repository<{ id: string }>,
   "bz.boms": BomRepo as Repository<{ id: string }>,
   "bz.productions": ProductionRepo as Repository<{ id: string }>,
+  "bz.piece-sorts": PieceSortRepo as Repository<{ id: string }>,
   "bz.bs-accounts": BsAccountRepo as Repository<{ id: string }>,
   "bz.fin-config": FinConfigRepo as Repository<{ id: string }>,
 };
@@ -335,7 +339,14 @@ const ALL_REPOS = Object.values(REPO_BY_KEY);
 const MODULE_REPOS: Record<ModuleKey, Repository<{ id: string }>[]> = {
   // Manufacturing lives under Master Data: a production run is a stock
   // movement, made by the same people who keep items and stock right.
-  masterData: [PartyRepo, ItemRepo, StockAdjustmentRepo, BomRepo, ProductionRepo] as Repository<{
+  masterData: [
+    PartyRepo,
+    ItemRepo,
+    StockAdjustmentRepo,
+    BomRepo,
+    ProductionRepo,
+    PieceSortRepo,
+  ] as Repository<{
     id: string;
   }>[],
   documents: [BusinessDocRepo] as Repository<{ id: string }>[],

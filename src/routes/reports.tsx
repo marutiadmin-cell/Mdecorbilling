@@ -13,10 +13,11 @@ import {
   BankRepo,
   JournalVoucherRepo,
   ProductionRepo,
+  StockAdjustmentRepo,
 } from "@/repositories";
 import { absorbedConversionCost } from "@/lib/production";
 import { averageCostMap, costOf, saleCostMap, stockValueOf } from "@/lib/finData";
-import { cogsOf } from "@/lib/stockValuation";
+import { cogsOf, wastageValue } from "@/lib/stockValuation";
 import { matchesQuery } from "@/lib/search";
 import { fmtMoney, fmtDate, today } from "@/lib/format";
 import { useFinancialYear } from "@/store/financialYear";
@@ -458,7 +459,14 @@ function ReportView({
     // Each line at what it really cost — the weighted average at the moment
     // it moved, live from the books — so editing or deleting a purchase
     // re-costs the sales after it. (Not the cost frozen on the bill.)
-    const cogs = cogsOf(sales, saleReturns, saleCostMap());
+    const costMap = saleCostMap();
+    const cogs = cogsOf(sales, saleReturns, costMap);
+    // Cutting scrap (slat/rail ends too short to use) — an expense of its
+    // own, at what that length cost (lib/stockValuation.ts).
+    const cuttingWastage = wastageValue(
+      StockAdjustmentRepo.all().filter((a) => a.date >= dateFrom && a.date <= dateTo),
+      costMap,
+    );
     const netPurchases = r2(valueExTax(purchases) - returnValueExTax(purchaseReturns));
     const grossProfit = r2(netRevenue - cogs);
     // A Journal Voucher expense leg (Dr increases the expense recognized,
@@ -480,7 +488,9 @@ function ReportView({
     // `exp`, and the same labour is inside COGS for every made item sold, so
     // it is given back here once (see absorbedConversionCost).
     const absorbed = absorbedConversionCost(ProductionRepo.all(), dateFrom, dateTo);
-    const netProfit = r2(grossProfit - exp + absorbed - discountAllowed + discountReceived);
+    const netProfit = r2(
+      grossProfit - exp - cuttingWastage + absorbed - discountAllowed + discountReceived,
+    );
 
     return (
       <div className="max-w-2xl">
@@ -520,6 +530,9 @@ function ReportView({
             <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Expenses</p>
           </div>
           <PLRow label="Operating Expenses" value={-exp} />
+          {cuttingWastage > 0 && (
+            <PLRow label="Cutting wastage (offcuts too short to use)" value={-cuttingWastage} />
+          )}
           {discountAllowed > 0 && (
             <PLRow label="Discount Allowed (settlements)" value={-discountAllowed} />
           )}

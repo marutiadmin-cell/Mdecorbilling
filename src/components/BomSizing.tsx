@@ -168,6 +168,18 @@ export function starterRows(s: Starter, items: Item[]): DraftComponent[] {
   return s.rows.map((r) => {
     const hits = items.filter((i) => i.kind !== "finished" && r.match.test(i.name));
     const it = hits.length === 1 ? hits[0] : undefined;
+    // Slats kept by length: N pieces, each as wide as the blind.
+    if (it?.pieces && r.hint === "Slats")
+      return {
+        key: genId(),
+        hint: r.hint,
+        itemId: it.id,
+        itemName: it.name,
+        unit: it.unit,
+        qty: 0,
+        wastagePct: 0,
+        cut: { countFormula: r.qtyFormula, lengthFormula: "W" },
+      };
     return {
       key: genId(),
       hint: r.hint,
@@ -454,36 +466,82 @@ export function SizedMaterialRows({
               newItemKind="raw"
               className={inputCls}
             />
-            <div className="min-w-0">
-              <input
-                value={c.qtyFormula ?? ""}
-                onChange={(e) => patch(c.key, { qtyFormula: e.target.value })}
-                placeholder="e.g. 2  or  CEIL(H / 1.13)"
-                aria-label="Quantity formula"
-                aria-invalid={!!err}
-                title={err ? `${err.error} (at character ${err.pos + 1})` : undefined}
-                spellCheck={false}
-                className={`${inputCls} font-mono ${err ? "border-rose-500 focus:border-rose-500 focus:ring-rose-500" : ""}`}
-              />
-              {err && <p className="text-[11px] text-rose-600 mt-0.5">{err.error}</p>}
-            </div>
-            <select
-              value={c.resultUnit ?? ""}
-              onChange={(e) => patch(c.key, { resultUnit: e.target.value || undefined })}
-              aria-label="Answer unit"
-              title="The unit your formula answers in — converted to the item's own unit"
-              className={`${inputCls} hidden sm:block`}
-            >
-              {ANSWER_UNITS.map((u) => (
-                <option key={u} value={u}>
-                  {u === ""
-                    ? `as item (${itemUnit || "—"})`
-                    : u === "sqft"
-                      ? "sq ft"
-                      : LENGTH_LABEL[u as LengthUnit]}
-                </option>
-              ))}
-            </select>
+            {c.cut ? (
+              <div className="min-w-0 grid grid-cols-2 gap-1.5">
+                <input
+                  value={c.cut.countFormula}
+                  onChange={(e) =>
+                    patch(c.key, { cut: { ...c.cut!, countFormula: e.target.value } })
+                  }
+                  placeholder="pieces, e.g. CEIL(H / 1.13)"
+                  aria-label="Cut pieces count"
+                  title="How many pieces one blind needs"
+                  spellCheck={false}
+                  className={`${inputCls} font-mono ${c.cut.countFormula && syntaxError(c.cut.countFormula) ? "border-rose-500" : ""}`}
+                />
+                <input
+                  value={c.cut.lengthFormula}
+                  onChange={(e) =>
+                    patch(c.key, { cut: { ...c.cut!, lengthFormula: e.target.value } })
+                  }
+                  placeholder="each long, e.g. W - 0.25"
+                  aria-label="Cut piece length"
+                  title="How long each piece is cut (in the unit at the right)"
+                  spellCheck={false}
+                  className={`${inputCls} font-mono ${c.cut.lengthFormula && syntaxError(c.cut.lengthFormula) ? "border-rose-500" : ""}`}
+                />
+              </div>
+            ) : (
+              <div className="min-w-0">
+                <input
+                  value={c.qtyFormula ?? ""}
+                  onChange={(e) => patch(c.key, { qtyFormula: e.target.value })}
+                  placeholder="e.g. 2  or  CEIL(H / 1.13)"
+                  aria-label="Quantity formula"
+                  aria-invalid={!!err}
+                  title={err ? `${err.error} (at character ${err.pos + 1})` : undefined}
+                  spellCheck={false}
+                  className={`${inputCls} font-mono ${err ? "border-rose-500 focus:border-rose-500 focus:ring-rose-500" : ""}`}
+                />
+                {err && <p className="text-[11px] text-rose-600 mt-0.5">{err.error}</p>}
+              </div>
+            )}
+            {c.cut ? (
+              <select
+                value={c.cut.lengthUnit ?? ""}
+                onChange={(e) =>
+                  patch(c.key, { cut: { ...c.cut!, lengthUnit: e.target.value || undefined } })
+                }
+                aria-label="Cut length unit"
+                title="The unit each piece's length is in — converted to the item's own"
+                className={`${inputCls} hidden sm:block`}
+              >
+                <option value="">length in W/H unit</option>
+                {LENGTH_UNITS.map((u) => (
+                  <option key={u} value={u}>
+                    {LENGTH_LABEL[u]}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <select
+                value={c.resultUnit ?? ""}
+                onChange={(e) => patch(c.key, { resultUnit: e.target.value || undefined })}
+                aria-label="Answer unit"
+                title="The unit your formula answers in — converted to the item's own unit"
+                className={`${inputCls} hidden sm:block`}
+              >
+                {ANSWER_UNITS.map((u) => (
+                  <option key={u} value={u}>
+                    {u === ""
+                      ? `as item (${itemUnit || "—"})`
+                      : u === "sqft"
+                        ? "sq ft"
+                        : LENGTH_LABEL[u as LengthUnit]}
+                  </option>
+                ))}
+              </select>
+            )}
             <NumInput
               value={c.wastagePct ?? 0}
               onValue={(n) => patch(c.key, { wastagePct: Math.min(100, n) })}
@@ -498,6 +556,26 @@ export function SizedMaterialRows({
             >
               <X className="h-3.5 w-3.5" />
             </button>
+            {it?.pieces && (
+              <label className="col-span-full flex items-center gap-2 text-[11.5px] text-muted-foreground cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={!!c.cut}
+                  onChange={(e) =>
+                    patch(c.key, {
+                      cut: e.target.checked
+                        ? { countFormula: c.qtyFormula?.trim() || "1", lengthFormula: "W" }
+                        : undefined,
+                    })
+                  }
+                  aria-label="Cut as pieces"
+                />
+                <span>
+                  <b className="text-foreground">Cut as pieces</b> — {it.name} is kept by length;
+                  production picks the pieces from stock and keeps the offcuts
+                </span>
+              </label>
+            )}
             {c.resultUnit && lengthUnitOf(c.resultUnit) && it && !lengthItem && (
               <p className="col-span-full text-[11px] text-amber-700">
                 The formula answers a length, but {it.name} is stocked in "{itemUnit}" — set the

@@ -51,6 +51,7 @@ import {
   PaymentRepo,
   CompanyRepo,
   StockAdjustmentRepo,
+  PieceSortRepo,
   BusinessDocRepo,
   EstimateRepo,
   nextInvoiceNumber,
@@ -6380,6 +6381,216 @@ async function runAll(): Promise<Results> {
     assert(
       Math.abs(ItemRepo.get("MB-BLIND")!.stock - 28.19) < 0.011,
       `mtm production: 28.19 sq ft of blind into stock, got ${ItemRepo.get("MB-BLIND")!.stock}`,
+    );
+  }
+
+  /* ── Slats by length: sizes, automatic cutting, offcuts, wastage ──────
+     The shop's ask: "50 ft of slats — how many pieces of 5 ft, 10 ft, 20 ft;
+     and as they are used, managed by itself". Stock is the total length;
+     sizes are sorted once; a blind's production run picks the pieces
+     (smallest that fits, offcuts first), keeps leftovers ≥ the minimum as
+     new sizes, books shorter ones as Cutting wastage — and deleting the run
+     puts every piece and every foot back. */
+  {
+    ItemRepo.add({
+      id: "PZ-SLAT",
+      name: "Slat Basswood 50mm",
+      unit: "FT",
+      kind: "raw",
+      purchasePrice: 11,
+      salePrice: 0,
+      gstRate: 18,
+      stock: 200,
+      openingStock: 200,
+      pieces: { minOffcut: 1, barLength: 20 },
+      createdAt: "2026-01-01T00:00:00Z",
+    } as never);
+    ItemRepo.add({
+      id: "PZ-BLIND",
+      name: "Basswood Blind",
+      unit: "PCS",
+      kind: "finished",
+      purchasePrice: 0,
+      salePrice: 0,
+      gstRate: 0,
+      stock: 0,
+      openingStock: 0,
+      createdAt: "2026-01-01T00:00:00Z",
+    } as never);
+    BomRepo.add({
+      id: "PZ-BOM",
+      name: "Basswood Blind by size",
+      finishedItemId: "PZ-BLIND",
+      finishedItemName: "Basswood Blind",
+      outputQty: 1,
+      components: [
+        {
+          itemId: "PZ-SLAT",
+          itemName: "Slat Basswood 50mm",
+          unit: "FT",
+          qty: 0,
+          cut: { countFormula: "CEIL(H / 1.13)", lengthFormula: "W" },
+        },
+      ],
+      additionalCosts: [],
+      sizing: { formulaUnit: "in", pricing: { basis: "piece" } },
+      createdAt: "2026-01-01T00:00:00Z",
+    } as never);
+
+    // The item page: sizes, and the unsorted 100 ft.
+    let page = await renderRoute("/items/PZ-SLAT");
+    const card = document.querySelector("[data-pieces-card]");
+    assert(!!card, "slats: a by-length item's page shows Pieces by size");
+    has(card?.textContent ?? "", "200 FT", "slats: all 200 ft unsorted to begin with");
+
+    // Sort 100 ft into 20 ft × 4 and 10 ft × 2.
+    const openSort = async () => {
+      await act(async () => {
+        findButton(/^Sort into sizes$/)?.click();
+      });
+      await settleMs(150);
+    };
+    const fillRows = async (rows: [number, number][]) => {
+      for (let i = 0; i < rows.length; i++) {
+        if (i > 0) {
+          await act(async () => {
+            findButton(/Another size/)?.click();
+          });
+          await settleMs(60);
+        }
+        const len = currentDialog().querySelectorAll('input[aria-label="Piece length"]')[i] as HTMLInputElement;
+        const cnt = currentDialog().querySelectorAll('input[aria-label="Piece count"]')[i] as HTMLInputElement;
+        await act(async () => setInput(len, String(rows[i][0])));
+        await act(async () => setInput(cnt, String(rows[i][1])));
+      }
+      await settleMs(80);
+    };
+    await openSort();
+    await fillRows([
+      [20, 8],
+      [10, 5],
+    ]);
+    await act(async () => {
+      findButton(/^Save$/)?.click();
+    });
+    await settleMs(200);
+    assert(PieceSortRepo.all().length === 0, "slats: sorting 210 ft out of 200 ft unsorted is refused");
+    await act(async () => {
+      const cnt = currentDialog().querySelectorAll('input[aria-label="Piece count"]')[1] as HTMLInputElement;
+      setInput(cnt, "4");
+    });
+    await settleMs(60);
+    await act(async () => {
+      findButton(/^Save$/)?.click();
+    });
+    await settleMs(250);
+    assert(PieceSortRepo.all().length === 1, "slats: 20 × 8 + 10 × 4 sorted");
+    assert(ItemRepo.get("PZ-SLAT")!.stock === 200, "slats: sorting moves no stock");
+    page = await renderRoute("/items/PZ-SLAT");
+    const rowsText = Array.from(document.querySelectorAll('table[aria-label="Pieces by size"] tr')).map((r) =>
+      (r.textContent ?? "").replace(/\s+/g, " ").trim(),
+    );
+    assert(
+      rowsText.some((t) => t.startsWith("20 FT") && t.includes("160 FT")) &&
+        rowsText.some((t) => t.startsWith("10 FT") && t.includes("40 FT")),
+      `slats: the sizes are listed — ${JSON.stringify(rowsText)}`,
+    );
+    has(page, "Sorted into sizes", "slats: the sort is in the item's history");
+
+    // A blind 58" wide × 35" tall: 31 slats of 4.8333 ft.
+    await renderRoute("/productions");
+    await act(async () => {
+      findButton(/New production/)?.click();
+    });
+    await settleMs(200);
+    await act(async () => {
+      (currentDialog().querySelector('[role="combobox"][aria-label="BOM"]') as HTMLButtonElement)?.click();
+    });
+    await settleMs(120);
+    const bomOpt = Array.from(document.querySelectorAll('[role="option"]')).find((o) =>
+      (o.textContent ?? "").includes("Basswood Blind by size"),
+    );
+    await act(async () => {
+      bomOpt?.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+    });
+    await settleMs(150);
+    await act(async () => setInput(currentDialog().querySelector('input[aria-label="Width"]') as HTMLInputElement, "58"));
+    await act(async () => setInput(currentDialog().querySelector('input[aria-label="Height"]') as HTMLInputElement, "35"));
+    await act(async () => setInput(currentDialog().querySelector('input[aria-label="Pieces"]') as HTMLInputElement, "1"));
+    await settleMs(150);
+    const planBox = currentDialog().querySelector('[data-cut-plan="PZ-SLAT"]');
+    assert(!!planBox, "slats: the production shows which pieces it will cut");
+    has(planBox?.textContent ?? "", "Take from stock", "slats: it takes pieces from the sizes on hand");
+    await act(async () => {
+      findButton(/^Save production$/)?.click();
+    });
+    await settleMs(300);
+    const run = ProductionRepo.all().find((p) => p.finishedItemId === "PZ-BLIND");
+    assert(!!run?.cuts?.length, "slats: the run records its cuts");
+    const cut = run?.cuts?.[0];
+    const takenLen = (cut?.taken ?? []).reduce((s, t) => s + t.length * t.count, 0);
+    const keptLen = (cut?.returned ?? []).reduce((s, t) => s + t.length * t.count, 0);
+    const usedLine = run?.components.find((c) => c.itemId === "PZ-SLAT")?.qty ?? 0;
+    assert(
+      Math.abs(takenLen + (cut?.fromLoose ?? 0) - (usedLine + (cut?.scrap ?? 0) + keptLen)) < 0.001 &&
+        (cut?.fromLoose ?? 0) === 0,
+      `slats: taken ${takenLen} (+ unsorted ${cut?.fromLoose}) = used ${usedLine} + scrap ${cut?.scrap} + kept ${keptLen}`,
+    );
+    assert(Math.abs(usedLine - 31 * (58 / 12)) < 0.01, `slats: 31 × 4.8333 ft used, got ${usedLine}`);
+    const stockAfter = ItemRepo.get("PZ-SLAT")!.stock;
+    assert(
+      Math.abs(stockAfter - (200 - usedLine - (cut?.scrap ?? 0))) < 0.011,
+      `slats: stock falls by used + scrap — ${stockAfter}`,
+    );
+    const waste = StockAdjustmentRepo.all().filter((a) => a.productionId === run?.id);
+    if ((cut?.scrap ?? 0) > 0) {
+      assert(waste.length === 1 && waste[0].kind === "wastage", "slats: the scrap is booked as Cutting wastage");
+      await renderRoute("/reports?r=pl");
+      has(host?.textContent ?? "", "Cutting wastage", "slats: the P&L shows Cutting wastage");
+    }
+    page = await renderRoute("/items/PZ-SLAT");
+    has(page, "Cutting wastage", "slats: the item history shows the wastage");
+
+    // Delete the run: every piece and every foot comes back.
+    await renderRoute("/productions");
+    const delRow = Array.from(document.querySelectorAll("tr")).find((r) => (r.textContent ?? "").includes(run?.number ?? "§"));
+    const prevConfirm = window.confirm;
+    window.confirm = () => true;
+    await act(async () => {
+      (delRow?.querySelector('button[title="Delete production"]') as HTMLButtonElement | null)?.click();
+    });
+    await settleMs(300);
+    window.confirm = prevConfirm;
+    assert(!ProductionRepo.get(run?.id ?? "§"), "slats: the run is deleted");
+    assert(ItemRepo.get("PZ-SLAT")!.stock === 200, `slats: stock back to 200 ft, got ${ItemRepo.get("PZ-SLAT")!.stock}`);
+    assert(
+      StockAdjustmentRepo.all().filter((a) => a.productionId === run?.id).length === 0,
+      "slats: its wastage went with it",
+    );
+    page = await renderRoute("/items/PZ-SLAT");
+    const back = Array.from(document.querySelectorAll('table[aria-label="Pieces by size"] tr')).map((r) =>
+      (r.textContent ?? "").replace(/\s+/g, " ").trim(),
+    );
+    assert(
+      back.some((t) => t.startsWith("20 FT") && t.includes("160 FT")),
+      `slats: the 20 ft pieces are all back — ${JSON.stringify(back)}`,
+    );
+
+    // The item form offers by-length keeping for a length unit.
+    await renderRoute("/items");
+    await act(async () => {
+      findButton(/New Item/)?.click();
+    });
+    await settleMs(150);
+    const unitBox = currentDialog().querySelector('input[aria-label="Unit"]') as HTMLInputElement | null;
+    await act(async () => {
+      unitBox?.focus();
+      setInput(unitBox, "FT");
+    });
+    await settleMs(120);
+    assert(
+      !!currentDialog().querySelector('input[aria-label="Keep by length"]'),
+      "slats: the item form offers Keep by length for an item in FT",
     );
   }
 

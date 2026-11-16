@@ -44,7 +44,13 @@ import {
   type DocRef,
   type Posting,
 } from "@/lib/postings";
-import { stockSnapshots, type StockData, type StockSnapshot } from "@/lib/stockValuation";
+import {
+  stockSnapshots,
+  saleLineCosts,
+  wastageValue,
+  type StockData,
+  type StockSnapshot,
+} from "@/lib/stockValuation";
 
 /* ── Dates ─────────────────────────────────────────────────────────────── */
 
@@ -250,6 +256,10 @@ export interface Financials {
   closingStock: number;
   closingStockByKind: Record<ItemKind, number>;
   grossProfit: number;
+  /** Cutting scrap in the period, at cost — an ABNORMAL LOSS (AS-2): credited
+   *  to the Trading account and debited to P&L as "Cutting wastage", so it
+   *  does not depress gross profit. Net profit is the same either way. */
+  abnormalLoss: number;
   /** Profit & loss account */
   indirectExpenses: Line[];
   discountAllowed: number;
@@ -371,8 +381,19 @@ export function buildFinancials(input: FinInput, from: string, to: string): Fina
   const openingStockP = paise(stock0.total);
   const closingStockP = paise(stock1.total);
   const directP = direct.reduce((s, l) => s + paise(l.amount), 0);
+  const abnormalLoss = wastageValue(
+    input.stock.stockAdjustments.filter((a) => a.date >= from && a.date <= to),
+    saleLineCosts(input.stock),
+  );
+  if (abnormalLoss > 0) indirect.push({ label: "Cutting wastage", amount: abnormalLoss });
   const grossP =
-    sales - salesReturns + closingStockP - openingStockP - (purchases - purchaseReturns) - directP;
+    sales -
+    salesReturns +
+    closingStockP -
+    openingStockP -
+    (purchases - purchaseReturns) -
+    directP +
+    paise(abnormalLoss);
   const indirectP = indirect.reduce((s, l) => s + paise(l.amount), 0);
   const otherP = otherIncome.reduce((s, l) => s + paise(l.amount), 0);
   const netP = grossP - indirectP - discountAllowed + discountReceived + otherP;
@@ -545,6 +566,7 @@ export function buildFinancials(input: FinInput, from: string, to: string): Fina
     closingStock: R(closingStockP),
     closingStockByKind: stock1.byKind,
     grossProfit: R(grossP),
+    abnormalLoss,
     indirectExpenses: indirect,
     discountAllowed: R(discountAllowed),
     discountReceived: R(discountReceived),

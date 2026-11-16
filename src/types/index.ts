@@ -121,7 +121,64 @@ export interface Item {
    *  restate every earlier balance sheet. Absent → valuation falls back to
    *  the first known purchase/production rate. */
   openingRate?: number;
+  /**
+   * Kept by length, piece by piece (slats, rails, rods): the stock is still
+   * the TOTAL length in the item's unit, and these pieces say what sizes it
+   * is in — "20 ft × 2, 10 ft × 1". See lib/pieces.ts and lib/cutting.ts.
+   * Absent = an ordinary item.
+   */
+  // null = switched off on an item that had it (an edit merges fields, so
+  // "absent" could not remove it).
+  pieces?: PieceSettings | null;
   createdAt: string;
+}
+
+/** How a by-length item is cut. Lengths are in the item's own unit. */
+export interface PieceSettings {
+  /** A leftover shorter than this is scrap (Cutting wastage); at least this
+   *  long, it goes back into stock as its own size. */
+  minOffcut: number;
+  /** The length a full piece is bought in (e.g. 20 ft) — a default when
+   *  sorting a purchase into sizes. */
+  barLength?: number;
+  /** Width the saw takes per cut. */
+  kerf?: number;
+}
+
+/** Some pieces of one length. */
+export interface PieceCount {
+  length: number;
+  count: number;
+}
+
+/**
+ * Sorting by-length stock into sizes WITHOUT moving it: "the 250 ft bought
+ * on PUR-0012 is 10 × 20 ft and 5 × 10 ft". Positive counts put unsorted
+ * length into sizes; negative take a size back to unsorted.
+ */
+export interface PieceSort {
+  id: ID;
+  itemId: ID;
+  itemName: string;
+  date: string;
+  pieces: PieceCount[];
+  note?: string;
+  createdAt: string;
+}
+
+/** What one production run cut, for one by-length material. */
+export interface ProductionCut {
+  itemId: ID;
+  /** Each length cut, as many times as it was cut. */
+  cuts: PieceCount[];
+  /** Pieces taken from the sizes in stock. */
+  taken: PieceCount[];
+  /** Leftovers long enough to keep — back in stock as their own size. */
+  returned: PieceCount[];
+  /** Leftovers too short to use — Cutting wastage. */
+  scrap: number;
+  /** Length that came from unsorted stock (no size recorded). */
+  fromLoose: number;
 }
 
 /**
@@ -163,6 +220,10 @@ export interface BomComponent {
   /** The unit that formula answers in ("ft", "m", "in", "pcs"…). A length
    *  converts to the item's own unit (lib/units.ts). Absent = the item's. */
   resultUnit?: string;
+  /** Size-based BOMs, by-length materials: cut as PIECES — how many, and how
+   *  long each (in `lengthUnit`, default the BOM's formula unit). The
+   *  quantity used is then count × length, and production picks the pieces. */
+  cut?: { countFormula: string; lengthFormula: string; lengthUnit?: string };
 }
 
 /** How one size-based BOM sells — the costing sheet's bottom half. */
@@ -262,6 +323,9 @@ export interface Production {
   notes?: string;
   /** Made to measure: the size it was made at, and how many pieces. */
   size?: { w: number; h: number; unit: LengthUnit; pieces: number };
+  /** By-length materials: which pieces were cut, what went back, what was
+   *  scrap. The scrap is a StockAdjustment (kind "wastage") of its own. */
+  cuts?: ProductionCut[];
   /** The finished item's purchasePrice just before this run replaced it —
    *  put back on delete, but only while this run is still the item's latest
    *  production and nothing has changed the price since. */
@@ -486,6 +550,12 @@ export interface StockAdjustment {
   type: "add" | "reduce";
   qty: number;
   reason?: string;
+  /** By-length items: the pieces this adds or removes (their total is qty). */
+  pieces?: PieceCount[];
+  /** "wastage": cutting scrap — shown as Cutting wastage, an expense. */
+  kind?: "wastage";
+  /** The production run that cut it, for wastage — deleted with it. */
+  productionId?: ID;
   createdAt: string;
 }
 

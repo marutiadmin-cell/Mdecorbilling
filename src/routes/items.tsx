@@ -1,5 +1,6 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { matchesQuery } from "@/lib/search";
+import { pieceDataFromRepos } from "@/lib/pieceData";
 import { useEffect, useRef, useState } from "react";
 import { PageHeader } from "@/components/PageHeader";
 import { DataTable, type Column } from "@/components/DataTable";
@@ -8,6 +9,7 @@ import { useAutoFocusOnDesktop } from "@/hooks/use-mobile";
 import {
   ItemRepo,
   StockAdjustmentRepo,
+  PieceSortRepo,
   BomRepo,
   ProductionRepo,
   SalesRepo,
@@ -29,6 +31,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Field } from "@/components/Field";
 import { ComboInput } from "@/components/ComboInput";
 import { NumField } from "@/components/NumInput";
+import { lengthUnitOf } from "@/lib/units";
+import { allBags } from "@/lib/pieces";
 import { fmtMoney, today } from "@/lib/format";
 import { downloadCsv } from "@/lib/csv";
 import { parseImportFile, normalizeHeader } from "@/lib/sheetImport";
@@ -100,6 +104,14 @@ function ItemsPage() {
   const [rows, setRows] = useState<Item[]>([]);
   // Cost is the weighted average; purchasePrice is the last purchase rate.
   const avgCosts = useRepoMemo(() => averageCostMap());
+  /** By-length items (slats, rails): how many sizes their stock is in. */
+  const sizesOf = useRepoMemo(() => allBags(ItemRepo.all(), pieceDataFromRepos()));
+  const sizesNote = (r: Item) => {
+    const b = r.pieces ? sizesOf.get(r.id) : undefined;
+    if (!b) return null;
+    const n = b.pieces.filter((x) => x.count > 0).length;
+    return n ? `${n} size${n === 1 ? "" : "s"}${b.loose > 0.001 ? " + unsorted" : ""}` : "unsorted";
+  };
   const [q, setQ] = useStickyState("items.search", "");
   const [open, setOpen] = useState(false);
   const [edit, setEdit] = useState<Item | null>(null);
@@ -159,6 +171,7 @@ function ItemsPage() {
       SaleReturnRepo.all().some((i) => i.lineItems.some((l) => l.itemId === r.id)) ||
       PurchaseReturnRepo.all().some((i) => i.lineItems.some((l) => l.itemId === r.id)) ||
       StockAdjustmentRepo.all().some((a) => a.itemId === r.id) ||
+      PieceSortRepo.all().some((x) => x.itemId === r.id) ||
       // A production run moved its stock; a BOM would offer a material that
       // no longer exists the next time it is used.
       ProductionRepo.all().some(
@@ -232,6 +245,11 @@ function ItemsPage() {
         return (
           <span className={low ? "text-warning font-medium" : ""}>
             {r.stock} {r.unit}
+            {sizesNote(r) && (
+              <span className="block text-[10.5px] text-muted-foreground font-normal">
+                {sizesNote(r)}
+              </span>
+            )}
           </span>
         );
       },
@@ -400,6 +418,7 @@ function ItemsPage() {
                       className={`text-xs font-semibold ${low ? "text-warning" : "text-gray-500"}`}
                     >
                       {r.stock} {r.unit} in stock
+                      {sizesNote(r) ? ` · ${sizesNote(r)}` : ""}
                     </span>
                     <div className="flex items-center gap-1">
                       <button
@@ -889,6 +908,68 @@ export function ItemDialog({
               setF({ ...f, minStock: v === "" ? undefined : Math.max(0, parseFloat(v) || 0) });
             }}
           />
+          {/* By-length stock (slats, rails, rods): stock stays the total
+              length; pieces say what sizes it is in, and production cuts
+              from the best-fitting one (lib/cutting.ts). */}
+          {(lengthUnitOf(f.unit) || f.pieces) && (
+            <div className="sm:col-span-3 rounded-md border border-primary/30 bg-primary/5 p-3 flex flex-col gap-2.5">
+              <label className="flex items-center gap-2 text-[12.5px] cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={!!f.pieces}
+                  onChange={(e) =>
+                    setF({
+                      ...f,
+                      // null, not undefined: an edit must be able to switch it off.
+                      pieces: e.target.checked
+                        ? { minOffcut: 1, barLength: undefined, kerf: 0 }
+                        : item?.pieces
+                          ? null
+                          : undefined,
+                    })
+                  }
+                  aria-label="Keep by length"
+                />
+                <span>
+                  <b>Keep by length — pieces by size</b>{" "}
+                  <span className="text-muted-foreground">
+                    (slats, rails, rods: "20 {f.unit} × 2, 10 {f.unit} × 1"; jobs cut from the
+                    best-fitting piece and keep the offcuts)
+                  </span>
+                </span>
+              </label>
+              {f.pieces && !lengthUnitOf(f.unit) && (
+                <p className="text-[11.5px] text-amber-700">
+                  Set the unit to a length (FT, MTR, INCH) — pieces are measured in it.
+                </p>
+              )}
+              {f.pieces && (
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <NumField
+                    label={`Shortest usable piece (${f.unit || "unit"}) *`}
+                    value={f.pieces.minOffcut}
+                    onValue={(n) => setF({ ...f, pieces: { ...f.pieces!, minOffcut: n } })}
+                  />
+                  <NumField
+                    label={`Full piece length (${f.unit || "unit"})`}
+                    value={f.pieces.barLength ?? 0}
+                    onValue={(n) =>
+                      setF({ ...f, pieces: { ...f.pieces!, barLength: n || undefined } })
+                    }
+                  />
+                  <NumField
+                    label={`Saw cut width (${f.unit || "unit"})`}
+                    value={f.pieces.kerf ?? 0}
+                    onValue={(n) => setF({ ...f, pieces: { ...f.pieces!, kerf: n || undefined } })}
+                  />
+                  <p className="sm:col-span-3 text-[11px] text-muted-foreground">
+                    A leftover shorter than the shortest usable piece is scrap (Cutting wastage, an
+                    expense); at least that long, it goes back into stock as its own size.
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
           <div className="sm:col-span-3 flex justify-end gap-2 mt-2">
             <Button
               type="button"

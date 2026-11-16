@@ -40,7 +40,9 @@ import type {
 } from "@/types";
 import { planDataRepair } from "@/lib/dataRepair";
 import { consumptionFor } from "@/lib/production";
-import { consumptionForSize, madeQty } from "@/lib/sizing";
+import { consumptionForSize, madeQty, bomVars, resolveComponents } from "@/lib/sizing";
+import { planCuts, lenKey } from "@/lib/cutting";
+import type { PieceCount, PieceSort } from "@/types";
 import { ymd } from "@/lib/format";
 
 const r2 = (n: number) => Math.round(n * 100) / 100;
@@ -66,6 +68,8 @@ export interface DemoShop {
   estimates: Estimate[];
   boms: Bom[];
   productions: Production[];
+  /** By-length stock (slats, rails) sorted into sizes. */
+  pieceSorts: PieceSort[];
   bsAccounts: BsAccount[];
   /** Settings → Manufacturing for made-to-measure work. */
   mtm: MtmSettings;
@@ -193,18 +197,75 @@ export function buildDemoShop(
     ["DB-DOR", "Dori (andar ni)", "PCS", 3],
     ["DB-BL", "Bottom lock", "PCS", 10],
   ] as const;
-  for (const [iid, name, unit, price] of blindRaw)
+  // Slats, rails and rod are kept BY LENGTH — bought as long pieces, cut to
+  // each blind, offcuts kept by size (lib/cutting.ts).
+  const BY_LENGTH: Record<
+    string,
+    {
+      unit: string;
+      price: number;
+      opening: number;
+      pieces: { minOffcut: number; barLength: number };
+      sizes: PieceCount[];
+    }
+  > = {
+    "DB-SLT": {
+      unit: "FT",
+      price: 11,
+      opening: 20000,
+      pieces: { minOffcut: 1, barLength: 20 },
+      sizes: [
+        { length: 20, count: 900 },
+        { length: 10, count: 150 },
+        { length: 5, count: 100 },
+      ],
+    },
+    "DB-HR": {
+      unit: "FT",
+      price: 112,
+      opening: 1200,
+      pieces: { minOffcut: 1, barLength: 16 },
+      sizes: [{ length: 16, count: 75 }],
+    },
+    "DB-ROD": {
+      unit: "FT",
+      price: 18,
+      opening: 1200,
+      pieces: { minOffcut: 1, barLength: 16 },
+      sizes: [{ length: 16, count: 75 }],
+    },
+    "DB-BOT": {
+      unit: "MTR",
+      price: 230,
+      opening: 1000,
+      pieces: { minOffcut: 0.3, barLength: 5 },
+      sizes: [{ length: 5, count: 200 }],
+    },
+  };
+  for (const [iid, name, unit, price] of blindRaw) {
+    const bl = BY_LENGTH[iid];
     addItem({
       id: fixed(iid),
       name,
-      unit,
+      unit: bl?.unit ?? unit,
       kind: "raw",
-      purchasePrice: price,
-      salePrice: r2(price * 1.4),
-      openingStock: 400,
+      purchasePrice: bl?.price ?? price,
+      salePrice: r2((bl?.price ?? price) * 1.4),
+      openingStock: bl?.opening ?? 400,
       gstRate: 18,
       category: "Blind hardware",
+      pieces: bl?.pieces,
     });
+  }
+  const pieceSorts: PieceSort[] = Object.entries(BY_LENGTH).map(([iid, bl]) => ({
+    id: id("PS"),
+    itemId: fixed(iid),
+    itemName: nm(blindRaw.find((r) => r[0] === iid)![1]),
+    date: dayAgo(700),
+    pieces: bl.sizes,
+    note: "Opening stock",
+    createdAt: T0,
+  }));
   addItem({
     id: fixed("DB-BLIND"),
     name: "Wooden Blind Easy Lift",
@@ -410,7 +471,7 @@ export function buildDemoShop(
   ].map((n) => ({ id: id("PY"), name: nm(n), createdAt: T0 }) as Payee);
 
   /* ── Bills ── */
-  const sellable = items.filter((i) => i.kind !== "raw" || ri(4) === 0);
+  const sellable = items.filter((i) => !i.pieces && (i.kind !== "raw" || ri(4) === 0));
   const buyable = items.filter((i) => i.kind !== "finished");
   const makeBill = (isSale: boolean, number: string): Invoice => {
     const party = pick(isSale ? customers : suppliers);
@@ -687,7 +748,7 @@ export function buildDemoShop(
   /* ── Stock adjustments ── */
   const stockAdjustments: StockAdjustment[] = [];
   for (let i = 0; i < Math.round(15 * scale); i++) {
-    const it = pick(items);
+    const it = pick(items.filter((x) => !x.pieces));
     const d = date();
     stockAdjustments.push({
       id: id("SA"),
@@ -738,6 +799,14 @@ export function buildDemoShop(
     qtyFormula,
     resultUnit,
   });
+  /** A by-length material cut as pieces: how many, each how long (inches). */
+  const cutRow = (iid: string, countFormula: string, lengthFormula: string) => ({
+    itemId: fixed(iid),
+    itemName: nameOf(iid),
+    unit: byId.get(fixed(iid))!.unit,
+    qty: 0,
+    cut: { countFormula, lengthFormula },
+  });
   const sizedBom: Bom = {
     id: fixed("BOM-EASY"),
     name: nm("Wooden Blind — Easy Lift"),
@@ -745,14 +814,14 @@ export function buildDemoShop(
     finishedItemName: nameOf("DB-BLIND"),
     outputQty: 1,
     components: [
-      c("DB-BOT", "W", "in"),
-      c("DB-SLT", "CEIL(H / SLAT_PITCH)"),
-      c("DB-HR", "W", "in"),
+      cutRow("DB-BOT", "1", "W"),
+      cutRow("DB-SLT", "CEIL(H / SLAT_PITCH)", "W"),
+      cutRow("DB-HR", "1", "W"),
       c("DB-MEC", "2"),
       c("DB-ATR", "CEIL(W / LADDER_GAP)"),
       c("DB-CHN", "1"),
       c("DB-LT", "CEIL(W / LADDER_GAP)"),
-      c("DB-ROD", "W", "in"),
+      cutRow("DB-ROD", "1", "W"),
       c("DB-CB", "2"),
       c("DB-DOR", "CEIL(W / LADDER_GAP)"),
       c("DB-BL", "CEIL(W / LADDER_GAP)"),
@@ -793,8 +862,15 @@ export function buildDemoShop(
   };
   const boms = [sizedBom, sofaBom];
   const productions: Production[] = [];
-  for (let i = 0; i < Math.round(12 * scale); i++) {
-    const d = date();
+  const bags = new Map<string, Map<number, number>>(
+    pieceSorts.map(
+      (ps) =>
+        [ps.itemId, new Map(ps.pieces.map((x) => [lenKey(x.length), x.count] as const))] as const,
+    ),
+  );
+  const runDates = Array.from({ length: Math.round(12 * scale) }, () => date()).sort();
+  for (let i = 0; i < runDates.length; i++) {
+    const d = runDates[i];
     const sized = ri(2) === 0;
     const b = sized ? sizedBom : sofaBom;
     const size = { w: 30 + ri(60), h: 30 + ri(80), unit: "in" as const, pieces: 1 + ri(3) };
@@ -802,11 +878,57 @@ export function buildDemoShop(
       ? consumptionForSize(b, size, size.pieces, byId, { roundUpWhole: true })
       : { lines: consumptionFor(b, 1, byId, true), costs: b.additionalCosts };
     const qty = sized ? madeQty(b, size, size.pieces, "SQFT", 15) : 1;
+    const prodId = id("MF");
+    const number = num("MFG-", i + 1);
+    // Cut the by-length materials from the sizes on hand, as production does.
+    const cuts: NonNullable<Production["cuts"]> = [];
+    if (sized) {
+      const { components } = resolveComponents(b, bomVars(b, size, [], {}, size.pieces), byId);
+      for (const comp of components) {
+        const it = byId.get(comp.itemId);
+        if (!it?.pieces || !comp.cutCount || !comp.cutLength) continue;
+        const bag = bags.get(it.id) ?? new Map<number, number>();
+        const plan = planCuts(
+          Array.from({ length: comp.cutCount * size.pieces }, () => comp.cutLength!),
+          [...bag].map(([length, count]) => ({ length, count })),
+          { minOffcut: it.pieces.minOffcut, kerf: it.pieces.kerf, loose: 0 },
+        );
+        for (const t of plan.taken) bag.set(t.length, (bag.get(t.length) ?? 0) - t.count);
+        for (const r of plan.returned) bag.set(r.length, (bag.get(r.length) ?? 0) + r.count);
+        bags.set(it.id, bag);
+        cuts.push({
+          itemId: it.id,
+          cuts: plan.cuts,
+          taken: plan.taken,
+          returned: plan.returned,
+          scrap: plan.scrap,
+          fromLoose: plan.fromLoose,
+        });
+        const line = run.lines.find((l) => l.itemId === it.id);
+        if (line) {
+          line.qty = plan.used;
+          line.amount = r2(plan.used * line.rate);
+        }
+        if (plan.scrap > 0.0001)
+          stockAdjustments.push({
+            id: id("SA"),
+            itemId: it.id,
+            itemName: it.name,
+            date: d,
+            type: "reduce",
+            qty: plan.scrap,
+            kind: "wastage",
+            productionId: prodId,
+            reason: `Cutting wastage — ${number}`,
+            createdAt: createdAt(d),
+          } as StockAdjustment);
+      }
+    }
     const material = r2(run.lines.reduce((a, l) => a + l.amount, 0));
     const add = r2(run.costs.reduce((a, x) => a + x.amount, 0));
     productions.push({
-      id: id("MF"),
-      number: num("MFG-", i + 1),
+      id: prodId,
+      number,
       date: d,
       bomId: b.id,
       bomName: b.name,
@@ -821,6 +943,7 @@ export function buildDemoShop(
       totalCost: r2(material + add),
       unitCost: r2((material + add) / (qty || 1)),
       size: sized ? size : undefined,
+      cuts: cuts.length ? cuts : undefined,
       createdAt: createdAt(d),
     } as Production);
   }
@@ -860,6 +983,31 @@ export function buildDemoShop(
     it.openingStock = r2((Number(it.openingStock) || 0) + top);
     it.stock = r2(st + top);
   }
+  // By-length items: never more in sizes than in stock. If the dummy runs
+  // cut more than the sorted pieces held (from unsorted length that was not
+  // there), give the item that much more unsorted OPENING stock.
+  {
+    const sizedOf = new Map<string, number>();
+    const addLen = (id: string, list: PieceCount[] | undefined, sign: number) =>
+      sizedOf.set(
+        id,
+        (sizedOf.get(id) ?? 0) + sign * (list ?? []).reduce((t, x) => t + x.length * x.count, 0),
+      );
+    for (const ps of pieceSorts) addLen(ps.itemId, ps.pieces, 1);
+    for (const pr of productions)
+      for (const c of pr.cuts ?? []) {
+        addLen(c.itemId, c.taken, -1);
+        addLen(c.itemId, c.returned, 1);
+      }
+    for (const it of items) {
+      if (!it.pieces) continue;
+      const loose = (Number(it.stock) || 0) - (sizedOf.get(it.id) ?? 0);
+      if (loose >= 0) continue;
+      const top = Math.ceil(-loose + 10);
+      it.openingStock = r2((Number(it.openingStock) || 0) + top);
+      it.stock = r2((Number(it.stock) || 0) + top);
+    }
+  }
   for (const a of planDataRepair(data()).accounts) {
     const bank = banks.find((x) => x.id === a.id);
     if (bank) bank.balance = a.correct;
@@ -883,6 +1031,7 @@ export function buildDemoShop(
     estimates,
     boms,
     productions,
+    pieceSorts,
     bsAccounts,
     mtm,
     expenseCategories,

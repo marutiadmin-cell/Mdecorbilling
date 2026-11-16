@@ -25,12 +25,14 @@
  *   - and each step's own result is what was typed.
  */
 import { createRoot, type Root } from "react-dom/client";
+import { pieceDataFromRepos } from "@/lib/pieceData";
 import { type ReactNode } from "react";
 import { createRouter, createMemoryHistory, RouterProvider, Outlet } from "@tanstack/react-router";
 import { QueryClient } from "@tanstack/react-query";
 import { routeTree } from "@/routeTree.gen";
 import { seedDemoShop } from "./demoShop";
 import { bookProblems } from "./books";
+import { bagsOf } from "@/lib/pieces";
 import { Toaster } from "@/components/ui/sonner";
 import { planDataRepair } from "@/lib/dataRepair";
 import { consumptionFor } from "@/lib/production";
@@ -54,7 +56,7 @@ import {
   BankTxnRepo,
   SaleReturnRepo,
   PurchaseReturnRepo,
-  StockAdjustmentRepo,
+  PieceSortRepo,
   JournalVoucherRepo,
 } from "@/repositories";
 import type { Invoice, Item, Party } from "@/types";
@@ -952,18 +954,29 @@ async function editBom() {
   )
     return;
   const dlg = dialog();
-  const i = between(0, Math.max(0, b.components.length - 1));
+  // A row cut as pieces has count/length boxes, not a quantity — edit one
+  // that has a quantity box, and find ITS box among those that do.
+  const editable = b.components.map((c, k) => ({ c, k })).filter((x) => !(b.sizing && x.c.cut));
+  if (!editable.length)
+    return notes.push(`${b.name}: every row is cut as pieces`) as unknown as void;
+  const chosen = pick(editable);
+  const i = chosen.k;
+  const boxIdx = b.sizing ? editable.indexOf(chosen) : i;
   const newQty = pick([1.5, 2, 6, 9.25]);
   // A made-to-measure BOM has a formula box; a plain number is a formula too.
   await typeInto(
     dlg?.querySelectorAll(
       b.sizing ? 'input[aria-label="Quantity formula"]' : 'input[aria-label="Material quantity"]',
-    )[i],
+    )[boxIdx],
     String(newQty),
     "material qty (edit)",
   );
   let dropped: string | null = null;
-  if (b.components.length > 1 && rand() < 0.4) {
+  const removeBtns = Array.from(
+    dlg?.querySelectorAll<HTMLElement>('button[title="Remove material"]') ?? [],
+  );
+  // A phone hides the remove buttons on these rows.
+  if (b.components.length > 1 && rand() < 0.4 && removeBtns[0]?.offsetParent !== null) {
     const j = i === 0 ? 1 : 0;
     dropped = b.components[j].itemId;
     await click(dlg?.querySelectorAll('button[title="Remove material"]')[j], "remove material");
@@ -1070,15 +1083,54 @@ async function createProduction() {
   );
 }
 
+/** By-length stock (slats, rails): sort unsorted length into sizes on the
+ *  item's own page, with real clicks — and the sizes must add up. */
+async function sortPieces() {
+  const tracked = ItemRepo.all().filter((i) => i.pieces);
+  if (!tracked.length) return;
+  const it = pick(tracked);
+  const loose = bagsOf(it, pieceDataFromRepos()).loose;
+  const len = pick([1, 2, 5]);
+  const count = Math.floor(Math.min(loose / len, 3));
+  if (count < 1) return notes.push(`${it.name}: nothing unsorted to sort`) as unknown as void;
+  await go(`/items/${it.id}`);
+  const before = PieceSortRepo.all().length;
+  if (!(await click(button(document, /^Sort into sizes$/), "Sort into sizes"))) return;
+  const dlg = dialog();
+  await typeInto(
+    dlg?.querySelector('input[aria-label="Piece length"]'),
+    String(len),
+    "piece length",
+  );
+  await typeInto(
+    dlg?.querySelector('input[aria-label="Piece count"]'),
+    String(count),
+    "piece count",
+  );
+  await clearToasts();
+  await click(button(dialog(), /^Save$/), "Save sort");
+  await wait(250);
+  assert(
+    PieceSortRepo.all().length === before + 1,
+    `${it.name}: sorting ${count} × ${len} of ${loose} unsorted not saved — toasts ${JSON.stringify(toasts())}`,
+  );
+}
+
 async function deleteProduction() {
   const p = pick(ProductionRepo.all());
   if (!p) return;
   await go("/productions");
-  await click(
-    rowWith(p.number)?.querySelector('button[title="Delete production"]'),
-    `delete ${p.number}`,
-  );
+  const row = rowWith(p.number);
+  // The register shows the financial year, a page at a time.
+  if (!row)
+    return notes.push(`${p.number} not on the first page of the register`) as unknown as void;
+  await click(row.querySelector('button[title="Delete production"]'), `delete ${p.number}`);
   await wait(250);
+  // Refusing is right when a later run cut this one's offcuts.
+  if (ProductionRepo.get(p.id) && toasts().some((t) => /offcuts were used/.test(t))) {
+    notes.push(`${p.number}: delete refused — a later run used its offcuts (correct)`);
+    return;
+  }
   assert(
     !ProductionRepo.get(p.id),
     `${p.number} was not deleted — toasts ${JSON.stringify(toasts())}`,
@@ -1133,6 +1185,7 @@ export async function run(): Promise<Results> {
       ["delete BOM", deleteBom, 1],
       ["create production", createProduction, 2],
       ["delete production", deleteProduction, 1],
+      ["sort pieces", sortPieces, 1],
     ];
     const bag = actions.flatMap(([n, f, w]) => Array.from({ length: w }, () => [n, f] as const));
     const counts = new Map<string, number>();

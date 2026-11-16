@@ -39,6 +39,7 @@ const COLLECTIONS: [string, keyof DemoShop][] = [
   ["stock-adjustments", "stockAdjustments"],
   ["estimates", "estimates"],
   ["productions", "productions"],
+  ["piece-sorts", "pieceSorts"],
 ];
 /** Everything the app stores per record — removal looks in all of them. */
 const ALL = [...COLLECTIONS.map(([c]) => c), "business-docs", "fin-config"];

@@ -9,11 +9,13 @@
  *  - no bill is paid below zero or above its total.
  */
 import { planDataRepair } from "@/lib/dataRepair";
+import { pieceDataFromRepos } from "@/lib/pieceData";
 import { buildPostings, unbalancedDocs, balances, rupees, ACC } from "@/lib/postings";
 import { buildFinancials } from "@/lib/financials";
 import { booksData, finInputFromRepos } from "@/lib/finData";
 import { netPartyPositions } from "@/lib/ledger";
 import { ymd } from "@/lib/format";
+import { allBags } from "@/lib/pieces";
 import {
   ItemRepo,
   PartyRepo,
@@ -90,5 +92,15 @@ export function bookProblems(): string[] {
   for (const inv of [...SalesRepo.all(), ...PurchaseRepo.all()])
     if (num(inv.paid) < -0.005 || num(inv.paid) > num(inv.total) + 0.011)
       out.push(`${inv.number}: paid ${inv.paid} of ${inv.total}`);
+  // By-length items: no size below zero, and never more in sizes than stock.
+  const bags = allBags(ItemRepo.all(), pieceDataFromRepos());
+  for (const it of ItemRepo.all()) {
+    const b = bags.get(it.id);
+    if (!b) continue;
+    if (b.loose < -0.01)
+      out.push(`${it.name}: sizes add up to ${-b.loose} ${it.unit} more than its stock`);
+    for (const x of b.pieces)
+      if (x.count < 0) out.push(`${it.name}: ${x.count} pieces of ${x.length} ${it.unit}`);
+  }
   return out;
 }

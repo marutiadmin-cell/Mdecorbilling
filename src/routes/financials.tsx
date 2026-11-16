@@ -1,7 +1,14 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
+import { allBags } from "@/lib/pieces";
+import { pieceDataFromRepos } from "@/lib/pieceData";
 import { useEffect, useRef, useState } from "react";
 import { PageHeader } from "@/components/PageHeader";
-import { BsAccountRepo, CompanyRepo, areReposHydrated } from "@/repositories";
+import {
+  BsAccountRepo,
+  CompanyRepo,
+  areReposHydrated,
+  ItemRepo,
+} from "@/repositories";
 import { useRepoData, useRepoMemo } from "@/hooks/useRepoData";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useFinancialYear } from "@/store/financialYear";
@@ -543,7 +550,7 @@ function TradingPL({ f }: { f: Financials }) {
   const directTotal = sum(f.directExpenses);
   const gp = f.grossProfit;
   const tradingDr = r2(f.openingStock + netPurch + directTotal + Math.max(0, gp));
-  const tradingCr = r2(netSales + f.closingStock + Math.max(0, -gp));
+  const tradingCr = r2(netSales + f.closingStock + f.abnormalLoss + Math.max(0, -gp));
   const indirect = sum(f.indirectExpenses);
   const other = sum(f.otherIncome);
   const np = f.netProfit;
@@ -572,6 +579,9 @@ function TradingPL({ f }: { f: Financials }) {
             <Row label="Sales (excl. GST)" amount={f.sales} />
             <Row label="Less: sales returns" amount={-f.salesReturns} level={1} muted />
             <Row label="Closing stock" amount={f.closingStock} bold />
+            {f.abnormalLoss > 0 && (
+              <Row label="Abnormal loss — cutting wastage" amount={f.abnormalLoss} />
+            )}
             {gp < 0 && <Row label="Gross loss c/d" amount={-gp} bold />}
           </>
         }
@@ -897,6 +907,22 @@ function Checks({
   const noCost = f.stockAtClose.items.filter((p) => p.qty > 0 && p.rate === 0);
   const negCash = f.cashBank.filter((l) => l.amount < 0);
   const notes = suspense.filter((s) => s.date === "" || s.date <= f.to);
+  // By-length items whose recorded sizes no longer match their stock —
+  // more pieces recorded than there is length, or a size below zero.
+  const sizeTrouble = (() => {
+    const items = ItemRepo.all().filter((i) => i.pieces);
+    const bags = allBags(items, pieceDataFromRepos());
+    return items.flatMap((i) => {
+      const b = bags.get(i.id);
+      if (!b) return [];
+      const out: string[] = [];
+      if (b.loose < -0.001)
+        out.push(`${i.name}: sizes add up to ${-b.loose} ${i.unit} more than the stock`);
+      for (const x of b.pieces)
+        if (x.count < 0) out.push(`${i.name}: ${x.count} pieces of ${x.length} ${i.unit}`);
+      return out;
+    });
+  })();
   const Item = ({
     ok,
     title,
@@ -984,6 +1010,18 @@ function Checks({
             .join(", ")}
       </Item>
       <Item
+        ok={sizeTrouble.length === 0}
+        title={
+          sizeTrouble.length
+            ? `${sizeTrouble.length} by-length item size record(s) do not match the stock`
+            : "Every by-length item's sizes match its stock"
+        }
+      >
+        {sizeTrouble.length > 0 &&
+          sizeTrouble.slice(0, 20).join("; ") +
+            " — open the item and use Remove pieces / Sort into sizes to put it right"}
+      </Item>
+      <Item
         ok={noCost.length === 0}
         title={
           noCost.length
@@ -1064,6 +1102,7 @@ function excelSheets(f: Financials, company: string) {
     ["Sales (excl. GST)", f.sales],
     ["Less: sales returns", -f.salesReturns],
     ["Closing stock", f.closingStock],
+    ...(f.abnormalLoss > 0 ? [["Abnormal loss — cutting wastage", f.abnormalLoss]] : []),
     ["GROSS PROFIT", f.grossProfit],
     ...f.indirectExpenses.map((l) => [`Expense: ${l.label}`, -l.amount]),
     ["Discount allowed", -f.discountAllowed],

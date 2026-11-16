@@ -1,5 +1,6 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
+import { pieceDataFromRepos } from "@/lib/pieceData";
 import { PageHeader } from "@/components/PageHeader";
 import { DataTable, type Column } from "@/components/DataTable";
 import {
@@ -8,6 +9,7 @@ import {
   ItemRepo,
   PartyRepo,
   ProductionRepo,
+  StockAdjustmentRepo,
   nextInvoiceNumber,
 } from "@/repositories";
 import { newBatch, commitBatch, genId } from "@/repositories/base";
@@ -32,6 +34,28 @@ import {
 } from "@/lib/production";
 import { averageCostMap, costOf } from "@/lib/finData";
 import { consumptionForSize, madeQty } from "@/lib/sizing";
+import { planRunCuts, toProductionCut } from "@/lib/productionCuts";
+import { fmtLen, piecesLabel, sizeBreaksIf } from "@/lib/pieces";
+import { lenKey } from "@/lib/cutting";
+
+/** Later runs that cut a length this run kept as an offcut. */
+function laterRunsUsingOffcuts(run: Production, all: Production[]): string[] {
+  const kept = new Set(
+    (run.cuts ?? []).flatMap((c) => c.returned.map((r) => `${c.itemId}|${lenKey(r.length)}`)),
+  );
+  if (!kept.size) return [];
+  return all
+    .filter(
+      (p) =>
+        p.id !== run.id &&
+        (p.date > run.date ||
+          (p.date === run.date && (p.createdAt ?? "") > (run.createdAt ?? ""))) &&
+        (p.cuts ?? []).some((c) =>
+          c.taken.some((t) => kept.has(`${c.itemId}|${lenKey(t.length)}`)),
+        ),
+    )
+    .map((p) => p.number);
+}
 import { LENGTH_LABEL, type LengthUnit } from "@/lib/units";
 import type { CostLine, Production, ProductionLine } from "@/types";
 import { Button } from "@/components/ui/button";
@@ -119,6 +143,24 @@ function ProductionsPage() {
       toast.info("This production run was already deleted");
       return;
     }
+    // Its offcuts may since have been cut by a later run — deleting it would
+    // leave that run using pieces that no longer exist.
+    {
+      const now = pieceDataFromRepos();
+      const broken = sizeBreaksIf(ItemRepo.all(), now, {
+        ...now,
+        productions: now.productions.filter((x) => x.id !== live.id),
+        stockAdjustments: now.stockAdjustments.filter((a) => a.productionId !== live.id),
+      });
+      if (broken.length) {
+        const later = laterRunsUsingOffcuts(live, now.productions);
+        toast.error(
+          `Can't delete ${live.number} — its offcuts were used by ${later.length ? later.join(", ") : "a later run"}. Delete ${later.length > 1 ? "those" : "that"} first. (${broken[0]})`,
+          { duration: 10000 },
+        );
+        return;
+      }
+    }
     const undo = productionMovements(live);
     const items = new Map(ItemRepo.all().map((i) => [i.id, i] as const));
     const short = stockShortfalls([], undo, items);
@@ -147,6 +189,11 @@ function ProductionsPage() {
       ItemRepo.adjustFieldBatched(batch, live.finishedItemId, "stock", 0, {
         purchasePrice: restore,
       });
+    }
+    // Its cutting wastage goes with it — the scrap length back into stock.
+    for (const a of StockAdjustmentRepo.all().filter((x) => x.productionId === live.id)) {
+      StockAdjustmentRepo.removeBatched(batch, a.id);
+      if (ItemRepo.get(a.itemId)) ItemRepo.adjustFieldBatched(batch, a.itemId, "stock", a.qty);
     }
     ProductionRepo.removeBatched(batch, live.id);
     commitBatch(batch, "delete production").then((ok) => {
@@ -508,6 +555,15 @@ function ProductionDialog({
       )
     : [];
   const blockNegative = CompanyRepo.get().allowNegativeStock === false;
+  /** By-length materials (slats, rails): which pieces this run cuts from,
+   *  what goes back as offcuts, and what is scrap. */
+  const cutPlans =
+    bom?.sizing && size.w > 0 && size.h > 0 && size.pieces > 0
+      ? planRunCuts(bom, size, size.pieces, items, pieceDataFromRepos(), {
+          constants: mtm?.constants,
+          editing: production,
+        })
+      : [];
   const materialChoices = items
     .filter((i) => i.id !== finishedId)
     .sort((a, b) => Number(b.kind === "raw") - Number(a.kind === "raw"));
@@ -571,6 +627,27 @@ function ProductionDialog({
       toast.error(`Not enough stock: ${short[0]}`, { duration: 8000 });
       return;
     }
+    if (production && cutPlans.length + (production.cuts?.length ?? 0) > 0) {
+      const now = pieceDataFromRepos();
+      const replaced = {
+        ...production,
+        date,
+        cuts: cutPlans.map(toProductionCut),
+        components: production.components,
+      } as Production;
+      const broken = sizeBreaksIf(ItemRepo.all(), now, {
+        ...now,
+        productions: now.productions.map((x) => (x.id === production.id ? replaced : x)),
+      });
+      if (broken.length) {
+        const later = laterRunsUsingOffcuts(production, now.productions);
+        toast.error(
+          `Can't change ${production.number}'s cutting — its offcuts were used by ${later.length ? later.join(", ") : "a later run"}. (${broken[0]})`,
+          { duration: 10000 },
+        );
+        return;
+      }
+    }
     savingRef.current = true;
     setSaving(true);
 
@@ -583,14 +660,28 @@ function ProductionDialog({
     const storedLastCost = ItemRepo.get(finishedId)?.purchasePrice ?? 0;
     const batch = newBatch();
 
+    // By-length materials use exactly what their cuts take (saw width
+    // included); the scrap is booked separately as Cutting wastage.
+    const planOf = new Map(cutPlans.map((r) => [r.itemId, r.plan] as const));
+    const finalLive = live.map((l) => {
+      const plan = planOf.get(l.itemId);
+      return plan ? { ...l, qty: plan.used, amount: r2(plan.used * l.rate) } : l;
+    });
+    const finalDraft = { ...draft, components: finalLive };
+
     // 1. Take back what the old version posted (edit), as every other edit
     //    path does — then post the new version. One batch: all or nothing.
     if (production) {
       for (const m of productionMovements(production)) {
         if (ItemRepo.get(m.itemId)) ItemRepo.adjustFieldBatched(batch, m.itemId, "stock", -m.qty);
       }
+      // The old run's cutting wastage is undone; the new plan books its own.
+      for (const a of StockAdjustmentRepo.all().filter((x) => x.productionId === production.id)) {
+        StockAdjustmentRepo.removeBatched(batch, a.id);
+        if (ItemRepo.get(a.itemId)) ItemRepo.adjustFieldBatched(batch, a.itemId, "stock", a.qty);
+      }
     }
-    for (const m of productionMovements(draft)) {
+    for (const m of productionMovements(finalDraft)) {
       if (ItemRepo.get(m.itemId)) ItemRepo.adjustFieldBatched(batch, m.itemId, "stock", m.qty);
     }
 
@@ -635,7 +726,7 @@ function ProductionDialog({
       finishedItemName: finished.name,
       unit: finished.unit,
       qty: r2(qty),
-      components: live.map(({ key: _k, ...l }) => {
+      components: finalLive.map(({ key: _k, ...l }) => {
         void _k;
         return {
           ...l,
@@ -652,10 +743,26 @@ function ProductionDialog({
       orderRef: orderRef.trim() || undefined,
       notes: notes.trim() || undefined,
       size: bom?.sizing ? { ...size, pieces: Number(size.pieces) || 0 } : undefined,
+      cuts: cutPlans.length ? cutPlans.map(toProductionCut) : undefined,
       prevFinishedCost,
     };
-    if (production) ProductionRepo.updateBatched(batch, production.id, record);
-    else ProductionRepo.addBatched(batch, record);
+    const savedId = production
+      ? (ProductionRepo.updateBatched(batch, production.id, record), production.id)
+      : ProductionRepo.addBatched(batch, record).id;
+    for (const r of cutPlans) {
+      if (!(r.plan.scrap > 0.0001)) continue;
+      StockAdjustmentRepo.addBatched(batch, {
+        itemId: r.itemId,
+        itemName: r.itemName,
+        date,
+        type: "reduce",
+        qty: r.plan.scrap,
+        kind: "wastage",
+        productionId: savedId,
+        reason: `Cutting wastage — ${record.number}`,
+      });
+      ItemRepo.adjustFieldBatched(batch, r.itemId, "stock", -r.plan.scrap);
+    }
 
     commitBatch(batch, "save production").then((ok) => {
       savingRef.current = false;
@@ -813,6 +920,42 @@ function ProductionDialog({
               />
             </div>
           </div>
+
+          {cutPlans.length > 0 && (
+            <div className="rounded-md border border-amber-300/60 bg-amber-50/60 p-2.5 text-[12px] flex flex-col gap-2">
+              <p className="font-semibold">Cutting — pieces picked automatically</p>
+              {cutPlans.map((r) => (
+                <div key={r.itemId} className="flex flex-col gap-0.5" data-cut-plan={r.itemId}>
+                  <p>
+                    <b>{r.itemName}</b>: {piecesLabel(r.plan.cuts, r.unit)} to cut
+                  </p>
+                  {r.plan.taken.length > 0 && (
+                    <p>Take from stock: {piecesLabel(r.plan.taken, r.unit)}</p>
+                  )}
+                  {r.plan.fromLoose > 0 && (
+                    <p>
+                      From unsorted length: {fmtLen(r.plan.fromLoose)} {r.unit}
+                    </p>
+                  )}
+                  {r.plan.returned.length > 0 && (
+                    <p className="text-emerald-700">
+                      Offcuts back to stock: {piecesLabel(r.plan.returned, r.unit)}
+                    </p>
+                  )}
+                  {r.plan.scrap > 0 && (
+                    <p className="text-rose-700">
+                      Scrap {fmtLen(r.plan.scrap)} {r.unit} → Cutting wastage (expense)
+                    </p>
+                  )}
+                  {r.plan.short > 0 && (
+                    <p className="text-rose-700 font-semibold">
+                      Short by {fmtLen(r.plan.short)} {r.unit} — not enough in stock
+                    </p>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
 
           <div>
             <div className="flex items-center justify-between gap-2 mb-1.5 flex-wrap">

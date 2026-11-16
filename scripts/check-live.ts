@@ -13,6 +13,7 @@ import { buildPostings, unbalancedDocs, balances, rupees, ACC } from "@/lib/post
 import { buildFinancials } from "@/lib/financials";
 import { netPartyPositions } from "@/lib/ledger";
 import { ymd } from "@/lib/format";
+import { sizeProblems } from "@/lib/pieces";
 
 initializeApp({ credential: cert(JSON.parse(readFileSync(process.argv[2], "utf8"))) });
 const db = getFirestore();
@@ -37,6 +38,7 @@ const all = async <T>(c: string) =>
     productions,
     accounts,
     finConfig,
+    pieceSorts,
   ] = await Promise.all(
     [
       "parties",
@@ -55,6 +57,7 @@ const all = async <T>(c: string) =>
       "productions",
       "bs-accounts",
       "fin-config",
+      "piece-sorts",
     ].map((c) => all<never>(c)),
   );
   const data = {
@@ -106,6 +109,22 @@ const all = async <T>(c: string) =>
     const posted = rupees(bal.get(ACC.party(p.partyId)) ?? 0);
     if (Math.abs(p.net - posted) >= 0.011) out.push(`${p.name}: ${p.net} vs books ${posted}`);
   }
+  // By-length items (slats, rails): sizes replayed from every document.
+  const tracked = (items as { pieces?: unknown }[]).filter((i) => i.pieces).length;
+  for (const p of sizeProblems(
+    items as never,
+    {
+      stockAdjustments,
+      pieceSorts,
+      productions,
+      sales,
+      purchases,
+      saleReturns,
+      purchaseReturns,
+    } as never,
+  ))
+    out.push(`sizes: ${p}`);
+  console.log(`by-length items checked: ${tracked}`);
   console.log(
     `checked ${sales.length} sales, ${purchases.length} purchases, ${payments.length} payments, ${items.length} items`,
   );

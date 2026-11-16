@@ -1,5 +1,7 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { matchesQuery } from "@/lib/search";
+import { pieceDataFromRepos } from "@/lib/pieceData";
+import { sizeBreaksIf } from "@/lib/pieces";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   PurchaseRepo,
@@ -173,6 +175,23 @@ function PurchasePage() {
           .join(", ")}). Delete the return(s) first.`,
       );
       return;
+    }
+    // By-length stock (slats, rails) bought on this bill may already be
+    // sorted into sizes or cut — deleting the bill would leave sizes with no
+    // stock behind them.
+    {
+      const now = pieceDataFromRepos();
+      const broken = sizeBreaksIf(ItemRepo.all(), now, {
+        ...now,
+        purchases: (now.purchases ?? []).filter((x) => x.id !== r.id),
+      });
+      if (broken.length) {
+        toast.error(
+          `Can't delete ${r.number} — its ${broken[0].split(":")[0]} is already sorted into sizes or cut. Remove those pieces first (open the item → Remove pieces). (${broken[0]})`,
+          { duration: 10000 },
+        );
+        return;
+      }
     }
     if (
       !confirm(

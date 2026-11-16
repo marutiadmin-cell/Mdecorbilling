@@ -65,6 +65,7 @@ import {
 import { readFileSync } from "node:fs";
 import { runFinancialsAudit } from "./financials.audit";
 import { runSizingAudit } from "./sizing.audit";
+import { runPiecesAudit, runReplayAudit, runGuardAudit } from "./pieces.audit";
 import { ledgerColumns } from "@/lib/ledger";
 import {
   classifySendFailure,
@@ -4435,6 +4436,11 @@ runFinancialsAudit(assert);
 
 /* ═══════ TEST SZ: made-to-measure formulas & the client costing sheet (tests/sizing.audit.ts) ═══ */
 runSizingAudit(assert);
+
+/* ═══════ TEST PC: by-length stock — cutting, sizes (tests/pieces.audit.ts) ═══ */
+runPiecesAudit(assert);
+runReplayAudit(assert);
+runGuardAudit(assert);
 
 console.log(`  AUDIT RESULT: ${passed} assertions passed, ${failed} failed`);
 if (fails.length) {

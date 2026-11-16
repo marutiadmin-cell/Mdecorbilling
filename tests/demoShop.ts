@@ -26,6 +26,7 @@ import {
   BsAccountRepo,
   FinConfigRepo,
   JournalVoucherRepo,
+  PieceSortRepo,
 } from "@/repositories";
 import { buildDemoShop } from "@/lib/demoData";
 
@@ -79,6 +80,7 @@ export function seedDemoShop(opts: { scale?: number; seed?: number } = {}): Demo
   put(StockAdjustmentRepo, shop.stockAdjustments);
   put(EstimateRepo, shop.estimates);
   put(ProductionRepo, shop.productions);
+  put(PieceSortRepo, shop.pieceSorts);
   FinConfigRepo.add({
     id: "config",
     expenseClass: { Freight: "direct", "Karigar wages": "direct" },

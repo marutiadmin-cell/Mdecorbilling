@@ -73,6 +73,12 @@ service cloud.firestore {
       allow create, update: if hasPerm('masterData', 'edit');
       allow delete: if hasPerm('masterData', 'delete');
     }
+    // By-length stock sorted into sizes (slats, rails) — moves no stock.
+    match /piece-sorts/{id} {
+      allow read: if hasPerm('masterData', 'view');
+      allow create, update: if hasPerm('masterData', 'edit');
+      allow delete: if hasPerm('masterData', 'delete');
+    }
     // Items are also written as a side effect of completing a sale/purchase/
     // return (stock reversal) — a Sales- or Purchase-only user still needs
     // to be able to finish that one write inside the same atomic batch, or

@@ -46,6 +46,10 @@ export interface ResolvedComponent extends BomComponent {
   /** A length answer landed on an item not stocked in a length (or vice
    *  versa) — almost always a mistake in the BOM. */
   unitMismatch?: boolean;
+  /** Cut pieces (BomComponent.cut): how many, each this long in the ITEM's
+   *  unit — for ONE finished piece. qty = cutCount × cutLength. */
+  cutCount?: number;
+  cutLength?: number;
 }
 
 /** The variables one window gives every formula of this BOM. */
@@ -81,7 +85,29 @@ export function resolveComponents(
     let base = Number(c.qty) || 0;
     let formulaValue: number | undefined;
     let unitMismatch = false;
-    if (bom.sizing && c.qtyFormula?.trim()) {
+    let cutCount: number | undefined;
+    let cutLength: number | undefined;
+    if (bom.sizing && c.cut?.countFormula?.trim() && c.cut.lengthFormula?.trim()) {
+      // Cut pieces: N pieces, each this long — the length answered in the
+      // cut's unit (default the BOM's) and turned into the item's own.
+      try {
+        cutCount = Math.max(0, Math.ceil(evaluate(c.cut.countFormula, vars) - 1e-9));
+        const len = evaluate(c.cut.lengthFormula, vars);
+        const conv = toItemUnit(len, c.cut.lengthUnit ?? bom.sizing.formulaUnit, itemUnit);
+        cutLength = r4(conv.value);
+        unitMismatch = conv.mismatch;
+        base = cutCount * conv.value; // exact length, rounded once below
+      } catch (e) {
+        problems.push({
+          where: `${c.itemName || "material"} (row ${index + 1})`,
+          index,
+          kind: "material",
+          message: e instanceof FormulaError ? e.message : String(e),
+          pos: e instanceof FormulaError ? e.pos : 0,
+        });
+        base = 0;
+      }
+    } else if (bom.sizing && c.qtyFormula?.trim()) {
       try {
         formulaValue = evaluate(c.qtyFormula, vars);
         const conv = toItemUnit(formulaValue, c.resultUnit, itemUnit);
@@ -110,8 +136,10 @@ export function resolveComponents(
       });
       base = 0;
     }
-    const qty = r4(base * (1 + (Number(c.wastagePct) || 0) / 100));
-    out.push({ ...c, unit: itemUnit, qty, formulaValue, unitMismatch });
+    // Cut pieces carry no wastage %: their real waste is the scrap the
+    // cutting plan works out, booked as Cutting wastage.
+    const qty = r4(cutCount !== undefined ? base : base * (1 + (Number(c.wastagePct) || 0) / 100));
+    out.push({ ...c, unit: itemUnit, qty, formulaValue, unitMismatch, cutCount, cutLength });
   });
   return { components: out, problems };
 }

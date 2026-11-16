@@ -386,7 +386,12 @@ function BomDialog({
     .filter((i) => i.id !== finishedId)
     .sort((a, b) => Number(b.kind === "raw") - Number(a.kind === "raw"));
 
-  const live = components.filter((c) => c.itemId && (sizing ? !!c.qtyFormula?.trim() : c.qty > 0));
+  // A cut row (pieces × length) has its quantity in its cut formulas.
+  const hasCut = (c: Pick<DraftComponent, "cut">) =>
+    !!(c.cut?.countFormula.trim() && c.cut.lengthFormula.trim());
+  const live = components.filter(
+    (c) => c.itemId && (sizing ? !!c.qtyFormula?.trim() || hasCut(c) : c.qty > 0),
+  );
   const draft: Bom = {
     id: bom?.id ?? "",
     name: name.trim(),
@@ -398,11 +403,25 @@ function BomDialog({
       void _k;
       void _h;
       const base = { ...c, itemName: byId.get(c.itemId)?.name ?? c.itemName };
-      if (sizing) return { ...base, qty: 0, qtyFormula: c.qtyFormula!.trim() };
+      if (sizing)
+        return hasCut(c)
+          ? {
+              ...base,
+              qty: 0,
+              qtyFormula: undefined,
+              resultUnit: undefined,
+              cut: {
+                countFormula: c.cut!.countFormula.trim(),
+                lengthFormula: c.cut!.lengthFormula.trim(),
+                lengthUnit: c.cut!.lengthUnit,
+              },
+            }
+          : { ...base, qty: 0, qtyFormula: c.qtyFormula!.trim(), cut: undefined };
       // A fixed BOM keeps no formula fields.
-      const { qtyFormula: _f, resultUnit: _u, ...fixed } = base;
+      const { qtyFormula: _f, resultUnit: _u, cut: _c, ...fixed } = base;
       void _f;
       void _u;
+      void _c;
       return fixed;
     }),
     additionalCosts: costs
@@ -446,7 +465,7 @@ function BomDialog({
       return;
     }
     if (sizing) {
-      if (components.some((c) => c.itemId && !c.qtyFormula?.trim())) {
+      if (components.some((c) => c.itemId && !c.qtyFormula?.trim() && !hasCut(c))) {
         toast.error(
           "Give every material a quantity — a number like 2, or a formula like CEIL(H / 1.13)",
         );
@@ -465,7 +484,11 @@ function BomDialog({
       // caught here — not at the counter, in front of a customer.
       const vars = bomVars(draft, { w: 48, h: 48, unit: sizing.formulaUnit }, constants, {}, 1);
       for (const c of draft.components) {
-        const r = tryEvaluate(c.qtyFormula ?? "", vars);
+        const r = c.cut
+          ? ([tryEvaluate(c.cut.countFormula, vars), tryEvaluate(c.cut.lengthFormula, vars)].find(
+              (x) => x.error,
+            ) ?? { value: 0 })
+          : tryEvaluate(c.qtyFormula ?? "", vars);
         if (r.error) {
           toast.error(`${c.itemName}: ${r.error}`, { duration: 9000 });
           return;

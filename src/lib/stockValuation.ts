@@ -226,7 +226,12 @@ export function stockSnapshots(
             date: a.date,
             created: a.createdAt ?? "",
             rank: RANK.adjustReduce,
-            apply: (s) => void out(s, a.itemId, q),
+            apply: (s) => {
+              const cost = out(s, a.itemId, q);
+              // Cutting scrap is an expense of its own (Cutting wastage):
+              // what it cost, at the average of that moment.
+              if (a.kind === "wastage") lineCosts?.set(wastageCostKey(a.id), cost);
+            },
           },
     );
   }
@@ -315,6 +320,19 @@ export function averageCosts(data: StockData): Map<string, number> {
 
 export const lineCostKey = (kind: "sale" | "saleReturn", docId: string, lineIndex: number) =>
   `${kind}:${docId}:${lineIndex}`;
+export const wastageCostKey = (adjustmentId: string) => `wastage:${adjustmentId}`;
+
+/** What the cutting scrap in these adjustments cost (already filtered to the
+ *  period), from the same cost map the sale lines use. */
+export function wastageValue(
+  adjustments: { id: string; kind?: string; qty: number; itemId: string }[],
+  costs: Map<string, number>,
+): number {
+  let total = 0;
+  for (const a of adjustments)
+    if (a.kind === "wastage") total += costs.get(wastageCostKey(a.id)) ?? 0;
+  return Math.round(total * 100) / 100;
+}
 
 /**
  * What every sale line (and every goods-returned line) cost the shop, at the
