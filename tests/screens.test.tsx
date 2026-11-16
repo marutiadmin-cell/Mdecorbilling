@@ -54,6 +54,7 @@ import {
   PieceSortRepo,
   BusinessDocRepo,
   EstimateRepo,
+  JobCardRepo,
   nextInvoiceNumber,
   PurchaseReturnRepo,
   CashAdjustmentRepo,
@@ -6458,8 +6459,12 @@ async function runAll(): Promise<Results> {
           });
           await settleMs(60);
         }
-        const len = currentDialog().querySelectorAll('input[aria-label="Piece length"]')[i] as HTMLInputElement;
-        const cnt = currentDialog().querySelectorAll('input[aria-label="Piece count"]')[i] as HTMLInputElement;
+        const len = currentDialog().querySelectorAll('input[aria-label="Piece length"]')[
+          i
+        ] as HTMLInputElement;
+        const cnt = currentDialog().querySelectorAll('input[aria-label="Piece count"]')[
+          i
+        ] as HTMLInputElement;
         await act(async () => setInput(len, String(rows[i][0])));
         await act(async () => setInput(cnt, String(rows[i][1])));
       }
@@ -6474,9 +6479,14 @@ async function runAll(): Promise<Results> {
       findButton(/^Save$/)?.click();
     });
     await settleMs(200);
-    assert(PieceSortRepo.all().length === 0, "slats: sorting 210 ft out of 200 ft unsorted is refused");
+    assert(
+      PieceSortRepo.all().length === 0,
+      "slats: sorting 210 ft out of 200 ft unsorted is refused",
+    );
     await act(async () => {
-      const cnt = currentDialog().querySelectorAll('input[aria-label="Piece count"]')[1] as HTMLInputElement;
+      const cnt = currentDialog().querySelectorAll(
+        'input[aria-label="Piece count"]',
+      )[1] as HTMLInputElement;
       setInput(cnt, "4");
     });
     await settleMs(60);
@@ -6487,9 +6497,9 @@ async function runAll(): Promise<Results> {
     assert(PieceSortRepo.all().length === 1, "slats: 20 × 8 + 10 × 4 sorted");
     assert(ItemRepo.get("PZ-SLAT")!.stock === 200, "slats: sorting moves no stock");
     page = await renderRoute("/items/PZ-SLAT");
-    const rowsText = Array.from(document.querySelectorAll('table[aria-label="Pieces by size"] tr')).map((r) =>
-      (r.textContent ?? "").replace(/\s+/g, " ").trim(),
-    );
+    const rowsText = Array.from(
+      document.querySelectorAll('table[aria-label="Pieces by size"] tr'),
+    ).map((r) => (r.textContent ?? "").replace(/\s+/g, " ").trim());
     assert(
       rowsText.some((t) => t.startsWith("20 FT") && t.includes("160 FT")) &&
         rowsText.some((t) => t.startsWith("10 FT") && t.includes("40 FT")),
@@ -6504,7 +6514,9 @@ async function runAll(): Promise<Results> {
     });
     await settleMs(200);
     await act(async () => {
-      (currentDialog().querySelector('[role="combobox"][aria-label="BOM"]') as HTMLButtonElement)?.click();
+      (
+        currentDialog().querySelector('[role="combobox"][aria-label="BOM"]') as HTMLButtonElement
+      )?.click();
     });
     await settleMs(120);
     const bomOpt = Array.from(document.querySelectorAll('[role="option"]')).find((o) =>
@@ -6514,13 +6526,32 @@ async function runAll(): Promise<Results> {
       bomOpt?.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
     });
     await settleMs(150);
-    await act(async () => setInput(currentDialog().querySelector('input[aria-label="Width"]') as HTMLInputElement, "58"));
-    await act(async () => setInput(currentDialog().querySelector('input[aria-label="Height"]') as HTMLInputElement, "35"));
-    await act(async () => setInput(currentDialog().querySelector('input[aria-label="Pieces"]') as HTMLInputElement, "1"));
+    await act(async () =>
+      setInput(
+        currentDialog().querySelector('input[aria-label="Width"]') as HTMLInputElement,
+        "58",
+      ),
+    );
+    await act(async () =>
+      setInput(
+        currentDialog().querySelector('input[aria-label="Height"]') as HTMLInputElement,
+        "35",
+      ),
+    );
+    await act(async () =>
+      setInput(
+        currentDialog().querySelector('input[aria-label="Pieces"]') as HTMLInputElement,
+        "1",
+      ),
+    );
     await settleMs(150);
     const planBox = currentDialog().querySelector('[data-cut-plan="PZ-SLAT"]');
     assert(!!planBox, "slats: the production shows which pieces it will cut");
-    has(planBox?.textContent ?? "", "Take from stock", "slats: it takes pieces from the sizes on hand");
+    has(
+      planBox?.textContent ?? "",
+      "Take from stock",
+      "slats: it takes pieces from the sizes on hand",
+    );
     await act(async () => {
       findButton(/^Save production$/)?.click();
     });
@@ -6532,11 +6563,14 @@ async function runAll(): Promise<Results> {
     const keptLen = (cut?.returned ?? []).reduce((s, t) => s + t.length * t.count, 0);
     const usedLine = run?.components.find((c) => c.itemId === "PZ-SLAT")?.qty ?? 0;
     assert(
-      Math.abs(takenLen + (cut?.fromLoose ?? 0) - (usedLine + (cut?.scrap ?? 0) + keptLen)) < 0.001 &&
-        (cut?.fromLoose ?? 0) === 0,
+      Math.abs(takenLen + (cut?.fromLoose ?? 0) - (usedLine + (cut?.scrap ?? 0) + keptLen)) <
+        0.001 && (cut?.fromLoose ?? 0) === 0,
       `slats: taken ${takenLen} (+ unsorted ${cut?.fromLoose}) = used ${usedLine} + scrap ${cut?.scrap} + kept ${keptLen}`,
     );
-    assert(Math.abs(usedLine - 31 * (58 / 12)) < 0.01, `slats: 31 × 4.8333 ft used, got ${usedLine}`);
+    assert(
+      Math.abs(usedLine - 31 * (58 / 12)) < 0.01,
+      `slats: 31 × 4.8333 ft used, got ${usedLine}`,
+    );
     const stockAfter = ItemRepo.get("PZ-SLAT")!.stock;
     assert(
       Math.abs(stockAfter - (200 - usedLine - (cut?.scrap ?? 0))) < 0.011,
@@ -6544,7 +6578,10 @@ async function runAll(): Promise<Results> {
     );
     const waste = StockAdjustmentRepo.all().filter((a) => a.productionId === run?.id);
     if ((cut?.scrap ?? 0) > 0) {
-      assert(waste.length === 1 && waste[0].kind === "wastage", "slats: the scrap is booked as Cutting wastage");
+      assert(
+        waste.length === 1 && waste[0].kind === "wastage",
+        "slats: the scrap is booked as Cutting wastage",
+      );
       await renderRoute("/reports?r=pl");
       has(host?.textContent ?? "", "Cutting wastage", "slats: the P&L shows Cutting wastage");
     }
@@ -6553,23 +6590,30 @@ async function runAll(): Promise<Results> {
 
     // Delete the run: every piece and every foot comes back.
     await renderRoute("/productions");
-    const delRow = Array.from(document.querySelectorAll("tr")).find((r) => (r.textContent ?? "").includes(run?.number ?? "§"));
+    const delRow = Array.from(document.querySelectorAll("tr")).find((r) =>
+      (r.textContent ?? "").includes(run?.number ?? "§"),
+    );
     const prevConfirm = window.confirm;
     window.confirm = () => true;
     await act(async () => {
-      (delRow?.querySelector('button[title="Delete production"]') as HTMLButtonElement | null)?.click();
+      (
+        delRow?.querySelector('button[title="Delete production"]') as HTMLButtonElement | null
+      )?.click();
     });
     await settleMs(300);
     window.confirm = prevConfirm;
     assert(!ProductionRepo.get(run?.id ?? "§"), "slats: the run is deleted");
-    assert(ItemRepo.get("PZ-SLAT")!.stock === 200, `slats: stock back to 200 ft, got ${ItemRepo.get("PZ-SLAT")!.stock}`);
+    assert(
+      ItemRepo.get("PZ-SLAT")!.stock === 200,
+      `slats: stock back to 200 ft, got ${ItemRepo.get("PZ-SLAT")!.stock}`,
+    );
     assert(
       StockAdjustmentRepo.all().filter((a) => a.productionId === run?.id).length === 0,
       "slats: its wastage went with it",
     );
     page = await renderRoute("/items/PZ-SLAT");
-    const back = Array.from(document.querySelectorAll('table[aria-label="Pieces by size"] tr')).map((r) =>
-      (r.textContent ?? "").replace(/\s+/g, " ").trim(),
+    const back = Array.from(document.querySelectorAll('table[aria-label="Pieces by size"] tr')).map(
+      (r) => (r.textContent ?? "").replace(/\s+/g, " ").trim(),
     );
     assert(
       back.some((t) => t.startsWith("20 FT") && t.includes("160 FT")),
@@ -6582,7 +6626,9 @@ async function runAll(): Promise<Results> {
       findButton(/New Item/)?.click();
     });
     await settleMs(150);
-    const unitBox = currentDialog().querySelector('input[aria-label="Unit"]') as HTMLInputElement | null;
+    const unitBox = currentDialog().querySelector(
+      'input[aria-label="Unit"]',
+    ) as HTMLInputElement | null;
     await act(async () => {
       unitBox?.focus();
       setInput(unitBox, "FT");
@@ -6591,6 +6637,233 @@ async function runAll(): Promise<Results> {
     assert(
       !!currentDialog().querySelector('input[aria-label="Keep by length"]'),
       "slats: the item form offers Keep by length for an item in FT",
+    );
+
+    // Buying slats: the line asks what pieces, and its qty follows them.
+    await renderRoute("/purchase/new");
+    const addBox = visibleAddItemInput();
+    await act(async () => {
+      addBox?.focus();
+      setInput(addBox, "Slat Basswood");
+    });
+    await settleMs(150);
+    const opt = Array.from(document.querySelectorAll<HTMLElement>("[data-opt]")).find(
+      (d) => (d.querySelector(".font-semibold")?.textContent ?? "").trim() === "Slat Basswood 50mm",
+    );
+    await act(async () => {
+      opt?.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true }));
+    });
+    await settleMs(200);
+    const pdlg = Array.from(document.querySelectorAll('[role="dialog"]')).find((d) =>
+      /Pieces — Slat Basswood/.test(d.querySelector("h2")?.textContent ?? ""),
+    ) as HTMLElement | undefined;
+    assert(!!pdlg, "slats purchase: adding a by-length item asks what pieces were bought");
+    await act(async () =>
+      setInput(
+        pdlg?.querySelector('input[aria-label="Line piece length"]') as HTMLInputElement,
+        "20",
+      ),
+    );
+    await act(async () =>
+      setInput(
+        pdlg?.querySelector('input[aria-label="Line piece count"]') as HTMLInputElement,
+        "5",
+      ),
+    );
+    await settleMs(80);
+    await act(async () => {
+      Array.from(pdlg?.querySelectorAll("button") ?? [])
+        .find((b) => /Use these pieces/.test(b.textContent ?? ""))
+        ?.click();
+    });
+    await settleMs(200);
+    const chipEl = Array.from(document.querySelectorAll<HTMLElement>("[data-pieces-for]")).find(
+      (e) => e.offsetParent !== null,
+    );
+    has(chipEl?.textContent ?? "", "20 FT × 5", "slats purchase: the line shows the pieces bought");
+    const qtyBox = Array.from(
+      document.querySelectorAll<HTMLInputElement>('input[id^="qty-"]'),
+    ).find((e) => e.offsetParent !== null);
+    assert(qtyBox?.value === "100", `slats purchase: qty = 20 × 5 = 100 FT, got ${qtyBox?.value}`);
+  }
+
+  /* ── Measured windows on the bill, and job cards for the workshop ─────
+     Adding a blind asks for its size; W 58 × H 35 in makes the line
+     14.1 sq ft at the BOM's maximum rate. An order with measured windows
+     makes one job card per window (WB-0001…), printed in the shop's own
+     layout; moving a card to "Ready" records the production run from it,
+     and moving it back undoes that run. */
+  {
+    const blindBom = BomRepo.all().find((b) => b.finishedItemId === "MB-BLIND" && b.sizing);
+    assert(!!blindBom, "jobs: the made-to-measure blind BOM from earlier is there");
+
+    // Measure on a sale line.
+    await renderRoute("/sales/new");
+    const add = visibleAddItemInput();
+    await act(async () => {
+      add?.focus();
+      setInput(add, "Wooden Blind Easy");
+    });
+    await settleMs(150);
+    const bOpt = Array.from(document.querySelectorAll<HTMLElement>("[data-opt]")).find(
+      (d) =>
+        (d.querySelector(".font-semibold")?.textContent ?? "").trim() === "Wooden Blind Easy Lift",
+    );
+    await act(async () => {
+      bOpt?.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true }));
+    });
+    await settleMs(200);
+    const mdlg = Array.from(document.querySelectorAll('[role="dialog"]')).find((d) =>
+      /Measure — Wooden Blind/.test(d.querySelector("h2")?.textContent ?? ""),
+    ) as HTMLElement | undefined;
+    assert(!!mdlg, "jobs: adding a made-to-measure item asks for its size");
+    await act(async () =>
+      setInput(mdlg?.querySelector('input[aria-label="Measure width"]') as HTMLInputElement, "58"),
+    );
+    await act(async () =>
+      setInput(mdlg?.querySelector('input[aria-label="Measure height"]') as HTMLInputElement, "35"),
+    );
+    await act(async () =>
+      setInput(
+        mdlg?.querySelector('input[aria-label="Serial number"]') as HTMLInputElement,
+        "1221",
+      ),
+    );
+    await settleMs(120);
+    has(
+      mdlg?.querySelector("[data-measure-sheet]")?.textContent ?? "",
+      fmtMoney(518.85),
+      "jobs: the measure shows the maximum rate",
+    );
+    await act(async () => {
+      Array.from(mdlg?.querySelectorAll("button") ?? [])
+        .find((b) => /Use this size/.test(b.textContent ?? ""))
+        ?.click();
+    });
+    await settleMs(200);
+    const sizeChip = Array.from(document.querySelectorAll<HTMLElement>("[data-size-for]")).find(
+      (e) => e.offsetParent !== null,
+    );
+    has(sizeChip?.textContent ?? "", 'W 58" × H 35"', "jobs: the line shows the size");
+    const lineQty = Array.from(
+      document.querySelectorAll<HTMLInputElement>('input[id^="qty-"]'),
+    ).find((e) => e.offsetParent !== null);
+    assert(lineQty?.value === "14.1", `jobs: the line is 14.1 sq ft, got ${lineQty?.value}`);
+
+    // An order with a measured window → job cards.
+    EstimateRepo.add({
+      id: "JQ1",
+      kind: "quotation",
+      status: "open",
+      number: "QT-0901",
+      date: D2,
+      partyId: "",
+      partyName: "Kunteshwar Furniture",
+      partyPhone: "9558945607",
+      lineItems: [
+        {
+          id: "JL1",
+          itemId: "MB-BLIND",
+          name: "Wooden Blind Easy Lift",
+          qty: 14.1,
+          unit: "sqft",
+          price: 519,
+          discountPct: 0,
+          gstRate: 0,
+          amount: 7317.9,
+          size: {
+            w: 58,
+            h: 35,
+            unit: "in",
+            pieces: 1,
+            sqft: 14.0972,
+            chargeableSqft: 14.0972,
+            type: "Easy Lift (Single Dori / Chain System)",
+            operateSide: "Right",
+            serial: "1221",
+            note: "31-10 sanj sudhi ready",
+            bomId: blindBom?.id,
+          },
+        },
+      ],
+      subtotal: 7317.9,
+      discount: 0,
+      taxAmount: 0,
+      total: 7318,
+      createdAt: "2026-01-01T00:00:00Z",
+    } as never);
+    await renderRoute("/quotations/JQ1");
+    await act(async () => {
+      findButton(/Create job cards/)?.click();
+    });
+    await settleMs(200);
+    const card = JobCardRepo.all().find((c) => c.sourceId === "JQ1");
+    assert(
+      !!card && /^WB-\d{4}$/.test(card.number),
+      `jobs: a card is made, numbered WB-…, got ${card?.number}`,
+    );
+    assert(
+      card?.serial === "1221" && card?.size.w === 58 && card?.type?.startsWith("Easy Lift"),
+      "jobs: it carries the window's size, type and serial",
+    );
+    const again = await renderRoute("/quotations/JQ1");
+    assert(!findButton(/Create job cards/), "jobs: a line with a card gets no second one");
+    has(again, card?.number ?? "§", "jobs: the order lists its job cards");
+
+    // The card prints the shop's way.
+    const page = await renderRoute(`/job-cards/${card?.id}`);
+    has(page, `Job Number: ${card?.number}`, "jobs: the printed card has its job number");
+    has(page, "Serial Number", "jobs: and the shop's table");
+    has(page, "W58", "jobs: with the size as written on the card");
+    const list = await renderRoute("/job-cards");
+    has(list, card?.number ?? "§", "jobs: the card is on the Job Cards page");
+
+    // Ready → the production run, filled in from the card.
+    await renderRoute(`/job-cards/${card?.id}`);
+    const readyBtn = Array.from(document.querySelectorAll("button")).find((b) =>
+      (b.textContent ?? "").startsWith("Ready"),
+    );
+    await act(async () => {
+      readyBtn?.click();
+    });
+    await settleMs(250);
+    const wBox = currentDialog().querySelector(
+      'input[aria-label="Width"]',
+    ) as HTMLInputElement | null;
+    assert(
+      wBox?.value === "58",
+      `jobs: the production is filled in from the card (width ${wBox?.value})`,
+    );
+    await act(async () => {
+      findButton(/^Save production$/)?.click();
+    });
+    await settleMs(300);
+    const madeCard = JobCardRepo.get(card!.id);
+    const run = madeCard?.productionId ? ProductionRepo.get(madeCard.productionId) : undefined;
+    assert(!!run && run.jobCardId === card?.id, "jobs: Ready records the production for the card");
+    assert(madeCard?.stage === "Ready", `jobs: the card is now Ready, got ${madeCard?.stage}`);
+    assert(
+      Math.abs((run?.qty ?? 0) - 14.1) < 0.011,
+      `jobs: it makes the 14.1 sq ft billed, got ${run?.qty}`,
+    );
+
+    // Back → the run is undone.
+    await renderRoute(`/job-cards/${card?.id}`);
+    const prevConfirm = window.confirm;
+    window.confirm = () => true;
+    const backBtn = Array.from(document.querySelectorAll("button")).find(
+      (b) => (b.textContent ?? "") === "Assembly",
+    );
+    await act(async () => {
+      backBtn?.click();
+    });
+    await settleMs(350);
+    window.confirm = prevConfirm;
+    const undone = JobCardRepo.get(card!.id);
+    assert(!ProductionRepo.get(run?.id ?? "§"), "jobs: moving it back undoes the production");
+    assert(
+      !undone?.productionId && undone?.stage === "Assembly",
+      `jobs: the card is back at Assembly, got ${undone?.stage}`,
     );
   }
 

@@ -47,6 +47,7 @@ const PATH_MODULE: Record<string, ModuleKey> = {
   // Manufacturing is a stock movement — same people, same permission.
   "/boms": "masterData",
   "/productions": "masterData",
+  "/job-cards": "masterData",
   "/documents": "documents",
   "/sales": "sales",
   "/sale-return": "sales",

@@ -10,6 +10,7 @@ import {
   PartyRepo,
   ProductionRepo,
   StockAdjustmentRepo,
+  JobCardRepo,
   nextInvoiceNumber,
 } from "@/repositories";
 import { newBatch, commitBatch, genId } from "@/repositories/base";
@@ -57,6 +58,7 @@ function laterRunsUsingOffcuts(run: Production, all: Production[]): string[] {
     .map((p) => p.number);
 }
 import { LENGTH_LABEL, type LengthUnit } from "@/lib/units";
+import { mtmOf } from "@/lib/mtm";
 import type { CostLine, Production, ProductionLine } from "@/types";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -87,6 +89,101 @@ export const Route = createFileRoute("/productions")({
 });
 
 const r2 = (n: number) => Math.round(n * 100) / 100;
+
+/**
+ * Delete a production run — every stock move undone in one batch, its cutting
+ * wastage with it, and a job card it was made for moved back a stage.
+ * Shared by the Production page and job cards. Resolves true once deleted.
+ */
+export function deleteProductionRun(
+  p: Production,
+  opts: { deleteAllowed: boolean },
+): Promise<boolean> {
+  const deleteAllowed = opts.deleteAllowed;
+  if (!deleteAllowed) {
+    toast.error("You don't have permission to delete production runs");
+    return Promise.resolve(false);
+  }
+  const live = ProductionRepo.get(p.id);
+  if (!live) {
+    toast.info("This production run was already deleted");
+    return Promise.resolve(false);
+  }
+  // Its offcuts may since have been cut by a later run — deleting it would
+  // leave that run using pieces that no longer exist.
+  {
+    const now = pieceDataFromRepos();
+    const broken = sizeBreaksIf(ItemRepo.all(), now, {
+      ...now,
+      productions: now.productions.filter((x) => x.id !== live.id),
+      stockAdjustments: now.stockAdjustments.filter((a) => a.productionId !== live.id),
+    });
+    if (broken.length) {
+      const later = laterRunsUsingOffcuts(live, now.productions);
+      toast.error(
+        `Can't delete ${live.number} — its offcuts were used by ${later.length ? later.join(", ") : "a later run"}. Delete ${later.length > 1 ? "those" : "that"} first. (${broken[0]})`,
+        { duration: 10000 },
+      );
+      return Promise.resolve(false);
+    }
+  }
+  const undo = productionMovements(live);
+  const items = new Map(ItemRepo.all().map((i) => [i.id, i] as const));
+  const short = stockShortfalls([], undo, items);
+  if (short.length && CompanyRepo.get().allowNegativeStock === false) {
+    toast.error(
+      `Can't delete — taking the made units back would leave stock below zero (already sold?): ${short[0]}`,
+      { duration: 8000 },
+    );
+    return Promise.resolve(false);
+  }
+  const msg = [
+    `Delete production ${live.number}?`,
+    "",
+    `${live.qty} × ${live.finishedItemName} will be taken back out of stock, and the materials put back.`,
+    short.length ? `Warning — stock goes below zero: ${short.join("; ")}` : null,
+  ]
+    .filter(Boolean)
+    .join("\n");
+  if (!confirm(msg)) return Promise.resolve(false);
+  const batch = newBatch();
+  for (const m of undo) {
+    if (ItemRepo.get(m.itemId)) ItemRepo.adjustFieldBatched(batch, m.itemId, "stock", -m.qty);
+  }
+  const restore = costToRestore(live, ItemRepo.get(live.finishedItemId), ProductionRepo.all());
+  if (restore !== undefined && ItemRepo.get(live.finishedItemId)) {
+    ItemRepo.adjustFieldBatched(batch, live.finishedItemId, "stock", 0, {
+      purchasePrice: restore,
+    });
+  }
+  // Its cutting wastage goes with it — the scrap length back into stock.
+  for (const a of StockAdjustmentRepo.all().filter((x) => x.productionId === live.id)) {
+    StockAdjustmentRepo.removeBatched(batch, a.id);
+    if (ItemRepo.get(a.itemId)) ItemRepo.adjustFieldBatched(batch, a.itemId, "stock", a.qty);
+  }
+  // Made for a job card: it goes back to the stage before "made".
+  if (live.jobCardId) {
+    const card = JobCardRepo.get(live.jobCardId);
+    if (card) {
+      const m = mtmOf(CompanyRepo.get());
+      const back = m.jobStages[Math.max(0, m.jobStages.indexOf(m.completeStage) - 1)];
+      JobCardRepo.updateBatched(batch, card.id, {
+        productionId: null,
+        stage: back,
+        history: [...(card.history ?? []), { stage: back, at: new Date().toISOString() }],
+      });
+    }
+  }
+  ProductionRepo.removeBatched(batch, live.id);
+  return commitBatch(batch, "delete production").then((ok) => {
+    if (!ok) {
+      toast.error("Could not delete — reload and check before trying again");
+      return false;
+    }
+    toast.success("Production deleted — stock reversed");
+    return true;
+  });
+}
 
 function ProductionsPage() {
   const { isOwner, canEdit, canDelete } = usePermissions();
@@ -133,77 +230,7 @@ function ProductionsPage() {
 
   const totalCost = r2(rows.reduce((s, p) => s + p.totalCost, 0));
 
-  const remove = (p: Production) => {
-    if (!deleteAllowed) {
-      toast.error("You don't have permission to delete production runs");
-      return;
-    }
-    const live = ProductionRepo.get(p.id);
-    if (!live) {
-      toast.info("This production run was already deleted");
-      return;
-    }
-    // Its offcuts may since have been cut by a later run — deleting it would
-    // leave that run using pieces that no longer exist.
-    {
-      const now = pieceDataFromRepos();
-      const broken = sizeBreaksIf(ItemRepo.all(), now, {
-        ...now,
-        productions: now.productions.filter((x) => x.id !== live.id),
-        stockAdjustments: now.stockAdjustments.filter((a) => a.productionId !== live.id),
-      });
-      if (broken.length) {
-        const later = laterRunsUsingOffcuts(live, now.productions);
-        toast.error(
-          `Can't delete ${live.number} — its offcuts were used by ${later.length ? later.join(", ") : "a later run"}. Delete ${later.length > 1 ? "those" : "that"} first. (${broken[0]})`,
-          { duration: 10000 },
-        );
-        return;
-      }
-    }
-    const undo = productionMovements(live);
-    const items = new Map(ItemRepo.all().map((i) => [i.id, i] as const));
-    const short = stockShortfalls([], undo, items);
-    if (short.length && CompanyRepo.get().allowNegativeStock === false) {
-      toast.error(
-        `Can't delete — taking the made units back would leave stock below zero (already sold?): ${short[0]}`,
-        { duration: 8000 },
-      );
-      return;
-    }
-    const msg = [
-      `Delete production ${live.number}?`,
-      "",
-      `${live.qty} × ${live.finishedItemName} will be taken back out of stock, and the materials put back.`,
-      short.length ? `Warning — stock goes below zero: ${short.join("; ")}` : null,
-    ]
-      .filter(Boolean)
-      .join("\n");
-    if (!confirm(msg)) return;
-    const batch = newBatch();
-    for (const m of undo) {
-      if (ItemRepo.get(m.itemId)) ItemRepo.adjustFieldBatched(batch, m.itemId, "stock", -m.qty);
-    }
-    const restore = costToRestore(live, ItemRepo.get(live.finishedItemId), ProductionRepo.all());
-    if (restore !== undefined && ItemRepo.get(live.finishedItemId)) {
-      ItemRepo.adjustFieldBatched(batch, live.finishedItemId, "stock", 0, {
-        purchasePrice: restore,
-      });
-    }
-    // Its cutting wastage goes with it — the scrap length back into stock.
-    for (const a of StockAdjustmentRepo.all().filter((x) => x.productionId === live.id)) {
-      StockAdjustmentRepo.removeBatched(batch, a.id);
-      if (ItemRepo.get(a.itemId)) ItemRepo.adjustFieldBatched(batch, a.itemId, "stock", a.qty);
-    }
-    ProductionRepo.removeBatched(batch, live.id);
-    commitBatch(batch, "delete production").then((ok) => {
-      if (!ok) {
-        toast.error("Could not delete — reload and check before trying again");
-        return;
-      }
-      toast.success("Production deleted — stock reversed");
-    });
-  };
+  const remove = (p: Production) => void deleteProductionRun(p, { deleteAllowed });
 
   const exportCsv = () =>
     downloadCsv(
@@ -450,14 +477,30 @@ type DraftLine = ProductionLine & { key: string };
 const toDraft = (l: ProductionLine): DraftLine => ({ ...l, key: genId() });
 const NO_BOM = "__none__";
 
-function ProductionDialog({
+/** A run started from a job card: what to make, at what size, for whom. */
+export interface ProductionPrefill {
+  bomId?: string;
+  finishedItemId?: string;
+  size?: { w: number; h: number; unit: LengthUnit; pieces: number };
+  qty?: number;
+  partyName?: string;
+  orderRef?: string;
+  notes?: string;
+  jobCardId?: string;
+}
+
+export function ProductionDialog({
   open,
   onOpenChange,
   production,
+  prefill,
+  onSaved,
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
   production: Production | null;
+  prefill?: ProductionPrefill;
+  onSaved?: (productionId: string) => void;
 }) {
   const items = useRepoMemo(() => ItemRepo.all());
   const boms = useRepoMemo(() => BomRepo.all());
@@ -510,7 +553,27 @@ function ProductionDialog({
       production?.size ?? { w: 0, h: 0, unit: CompanyRepo.get().mtm?.sizeUnit ?? "in", pieces: 1 },
     );
     setTouched(!!production);
-  }, [open, production]);
+    // From a job card: the BOM, size, qty and customer are already known.
+    if (!production && prefill) {
+      const b = prefill.bomId ? BomRepo.get(prefill.bomId) : undefined;
+      if (b) setBomId(b.id);
+      setFinishedId(prefill.finishedItemId ?? b?.finishedItemId ?? "");
+      if (prefill.partyName) setPartyName(prefill.partyName);
+      if (prefill.orderRef) setOrderRef(prefill.orderRef);
+      if (prefill.notes) setNotes(prefill.notes);
+      if (prefill.size) setSize(prefill.size);
+      if (b?.sizing && prefill.size) {
+        const r = consumptionForSize(b, prefill.size, prefill.size.pieces, byId, {
+          constants: CompanyRepo.get().mtm?.constants,
+          roundUpWhole: true,
+        });
+        setLines(r.lines.map(toDraft));
+        setCosts(r.costs);
+      }
+      if (prefill.qty) setQty(prefill.qty);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, production, prefill]);
 
   const bom = bomId === NO_BOM ? undefined : BomRepo.get(bomId);
   const fillFromBom = (b = bom, q = qty, round = roundUp, sz = size) => {
@@ -744,11 +807,24 @@ function ProductionDialog({
       notes: notes.trim() || undefined,
       size: bom?.sizing ? { ...size, pieces: Number(size.pieces) || 0 } : undefined,
       cuts: cutPlans.length ? cutPlans.map(toProductionCut) : undefined,
+      jobCardId: production?.jobCardId ?? prefill?.jobCardId,
       prevFinishedCost,
     };
     const savedId = production
       ? (ProductionRepo.updateBatched(batch, production.id, record), production.id)
       : ProductionRepo.addBatched(batch, record).id;
+    // Made for a job card: the card is now made, in the same batch.
+    if (!production && prefill?.jobCardId) {
+      const card = JobCardRepo.get(prefill.jobCardId);
+      if (card) {
+        const done = mtmOf(CompanyRepo.get()).completeStage;
+        JobCardRepo.updateBatched(batch, card.id, {
+          productionId: savedId,
+          stage: done,
+          history: [...(card.history ?? []), { stage: done, at: new Date().toISOString() }],
+        });
+      }
+    }
     for (const r of cutPlans) {
       if (!(r.plan.scrap > 0.0001)) continue;
       StockAdjustmentRepo.addBatched(batch, {
@@ -774,6 +850,7 @@ function ProductionDialog({
       toast.success(
         `${production ? "Updated" : "Saved"} ${record.number} — ${record.qty} × ${finished.name} at ${fmtMoney(totals.unitCost)} each`,
       );
+      onSaved?.(savedId);
       onOpenChange(false);
     });
   };

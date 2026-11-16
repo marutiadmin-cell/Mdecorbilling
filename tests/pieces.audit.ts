@@ -56,8 +56,8 @@ function cutting(assert: Assert) {
     { minOffcut: 0.5 },
   );
   assert(
-    b.returned.length === 1 && close(b.returned[0].length, 20 - 4 * L, 0.001),
-    `PC2: a 0.67 ft end is kept when the minimum is 0.5 — ${JSON.stringify(b.returned)}`,
+    b.returned.length === 1 && b.returned[0].length === 0.66,
+    `PC2: a 0.6667 ft end is kept, labelled 0.66 ft, when the minimum is 0.5 — ${JSON.stringify(b.returned)}`,
   );
   assert(conserved(b), "PC2: nothing lost");
 
@@ -350,5 +350,80 @@ export function runGuardAudit(assert: Assert) {
   assert(
     fine.length === 0,
     `PG2: deleting the LATER run B breaks nothing — ${JSON.stringify(fine)}`,
+  );
+}
+
+/* Sizes: twins merge at their label; bill lines can name their pieces. */
+export function runLinesAudit(assert: Assert) {
+  const it = {
+    id: "L",
+    name: "Slat",
+    unit: "FT",
+    stock: 0,
+    openingStock: 0,
+    pieces: { minOffcut: 1 },
+  } as Item;
+  // Two runs left 1.1667 and 1.1666 ft (older records, 4 decimals): one size.
+  const run = (id: string, len: number) =>
+    ({
+      id,
+      date: "2026-01-02",
+      components: [],
+      cuts: [
+        {
+          itemId: "L",
+          cuts: [],
+          taken: [],
+          returned: [{ length: len, count: 1 }],
+          scrap: 0,
+          fromLoose: 0,
+        },
+      ],
+    }) as unknown as Production;
+  const twins = allBags([it], {
+    stockAdjustments: [],
+    pieceSorts: [],
+    productions: [run("a", 1.1667), run("b", 1.1666)],
+  }).get("L")!;
+  assert(
+    twins.pieces.length === 1 && twins.pieces[0].length === 1.16 && twins.pieces[0].count === 2,
+    `PL1: 1.1667 and 1.1666 ft are one size, 1.16 ft × 2 — ${JSON.stringify(twins.pieces)}`,
+  );
+  // A purchase naming its pieces goes straight into sizes; a sale naming
+  // pieces takes exactly them; a purchase by the foot goes to unsorted.
+  const buy = {
+    id: "p",
+    date: "2026-01-01",
+    lineItems: [
+      {
+        itemId: "L",
+        qty: 120,
+        pieces: [
+          { length: 20, count: 5 },
+          { length: 10, count: 2 },
+        ],
+      },
+    ],
+  } as never;
+  const byFoot = { id: "q", date: "2026-01-01", lineItems: [{ itemId: "L", qty: 13 }] } as never;
+  const sell = {
+    id: "s",
+    date: "2026-01-03",
+    lineItems: [{ itemId: "L", qty: 20, pieces: [{ length: 20, count: 1 }] }],
+  } as never;
+  const b = allBags([it], {
+    stockAdjustments: [],
+    pieceSorts: [],
+    productions: [],
+    purchases: [buy, byFoot],
+    sales: [sell],
+  }).get("L")!;
+  assert(
+    JSON.stringify(b.pieces) ===
+      JSON.stringify([
+        { length: 20, count: 4 },
+        { length: 10, count: 2 },
+      ]) && close(b.loose, 13),
+    `PL2: bought 20 × 5 + 10 × 2 into sizes, 13 ft by the foot unsorted, sold one 20 ft — ${JSON.stringify(b)}`,
   );
 }

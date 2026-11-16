@@ -30,6 +30,7 @@ import {
   EstimateRepo,
   SaleReturnRepo,
   PurchaseReturnRepo,
+  JobCardRepo,
 } from "@/repositories";
 
 export interface Results {
@@ -178,6 +179,7 @@ export async function run(): Promise<Results> {
       "/inventory",
       "/boms",
       "/productions",
+      "/job-cards",
       "/quotations",
       "/proforma",
       "/bank",
@@ -245,6 +247,17 @@ export async function run(): Promise<Results> {
       await visit(
         `/${e.kind === "quotation" ? "quotations" : "proforma"}/${e.id}`,
         `${e.kind} ${e.number}`,
+      );
+
+    // A job card, and a blind order with measured windows.
+    for (const c of JobCardRepo.all().slice(0, 2))
+      await visit(`/job-cards/${c.id}`, `job card ${c.number}`);
+    for (const e of EstimateRepo.all()
+      .filter((x) => x.lineItems.some((l) => l.size))
+      .slice(0, 1))
+      await visit(
+        `/${e.kind === "quotation" ? "quotations" : "proforma"}/${e.id}`,
+        `blind order ${e.number}`,
       );
 
     // Opening every page must not have changed a single figure.

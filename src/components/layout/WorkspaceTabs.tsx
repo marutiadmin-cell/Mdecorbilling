@@ -181,6 +181,7 @@ function titleFromPath(path: string): string | null {
     "/inventory": "Inventory",
     "/boms": "Bill of Materials",
     "/productions": "Production",
+    "/job-cards": "Job Cards",
     "/financials": "Balance Sheet",
     "/balance-sheet-setup": "Balance Sheet Setup",
     "/bank": "Bank",

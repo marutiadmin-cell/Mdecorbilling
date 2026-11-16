@@ -24,6 +24,7 @@ import type {
   Bom,
   Production,
   PieceSort,
+  JobCard,
   BsAccount,
   FinConfig,
 } from "@/types";
@@ -57,6 +58,8 @@ export const BomRepo = new Repository<Bom>("boms");
 export const ProductionRepo = new Repository<Production>("productions");
 /* By-length stock put into sizes without moving it (lib/pieces.ts). */
 export const PieceSortRepo = new Repository<PieceSort>("piece-sorts");
+/* Job cards for the workshop (lib/jobCards.ts) — move no stock themselves. */
+export const JobCardRepo = new Repository<JobCard>("job-cards");
 /* The balance-sheet register — owner-only, read by the financial
    statements. Deliberately absent from MODULE_REPOS: only the owner's
    device loads it (see firestore.rules). FinConfig is one document, id
@@ -325,6 +328,7 @@ export const REPO_BY_KEY: Record<string, Repository<{ id: string }>> = {
   "bz.boms": BomRepo as Repository<{ id: string }>,
   "bz.productions": ProductionRepo as Repository<{ id: string }>,
   "bz.piece-sorts": PieceSortRepo as Repository<{ id: string }>,
+  "bz.job-cards": JobCardRepo as Repository<{ id: string }>,
   "bz.bs-accounts": BsAccountRepo as Repository<{ id: string }>,
   "bz.fin-config": FinConfigRepo as Repository<{ id: string }>,
 };
@@ -346,6 +350,7 @@ const MODULE_REPOS: Record<ModuleKey, Repository<{ id: string }>[]> = {
     BomRepo,
     ProductionRepo,
     PieceSortRepo,
+    JobCardRepo,
   ] as Repository<{
     id: string;
   }>[],

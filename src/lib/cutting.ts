@@ -18,6 +18,11 @@ import type { PieceCount } from "@/types";
 
 /** Lengths compared and grouped at 1/10,000 — no float dust in a size. */
 export const lenKey = (n: number) => Math.round(n * 10000) / 10000;
+/** A size as it is LABELLED and kept: to the hundredth (0.01 ft = 1/8"),
+ *  rounded DOWN — a piece is never shorter than its label says. Two
+ *  leftovers of 1.1667 and 1.1666 ft are both a 1.16 ft piece, not two
+ *  sizes that print the same. The sliver below the label is scrap. */
+export const sizeKey = (n: number) => Math.floor(n * 100 + 1e-6) / 100;
 
 export interface CutPlan {
   /** The lengths cut, grouped. */
@@ -111,9 +116,12 @@ export function planCuts(
   let scrap = 0;
   const steps: CutPlan["steps"] = [];
   for (const o of open) {
-    const kept = o.left > 0 && o.left + 1e-9 >= minOffcut && o.from !== "loose";
-    if (kept) returnedLengths.push(o.left);
-    else if (o.from !== "loose") scrap += o.left;
+    const label = sizeKey(o.left);
+    const kept = label > 0 && label + 1e-9 >= minOffcut && o.from !== "loose";
+    if (kept) {
+      returnedLengths.push(label);
+      scrap += o.left - label; // the sliver under the label
+    } else if (o.from !== "loose") scrap += o.left;
     steps.push({ from: o.from, cuts: o.cuts, left: o.left, kept });
   }
 

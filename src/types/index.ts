@@ -326,6 +326,8 @@ export interface Production {
   /** By-length materials: which pieces were cut, what went back, what was
    *  scrap. The scrap is a StockAdjustment (kind "wastage") of its own. */
   cuts?: ProductionCut[];
+  /** Made for this job card (WB-0136). */
+  jobCardId?: ID;
   /** The finished item's purchasePrice just before this run replaced it —
    *  put back on delete, but only while this run is still the item's latest
    *  production and nothing has changed the price since. */
@@ -358,6 +360,74 @@ export interface LineItem {
    * the parent Invoice's exchangeRate/carryCostPerUnit, but stays a normal
    * editable field so a cashier can still override the computed value. */
   foreignPrice?: number;
+  /** Made to measure (a blind, a curtain): the window this line is for. The
+   *  line's qty and price were worked out from it (sq ft or pieces); every
+   *  calculation still reads qty and price as on any other line. */
+  size?: LineSize;
+  /** By-length items (slats): the pieces this line is — "20 ft × 50". The
+   *  qty is their total length. A purchase puts them straight into their
+   *  sizes; a sale takes exactly them. Absent = by the foot (unsorted). */
+  pieces?: PieceCount[];
+}
+
+/** One measured window on a bill line, and what the job card needs. */
+export interface LineSize {
+  w: number;
+  h: number;
+  unit: LengthUnit;
+  pieces: number;
+  /** Area of one piece, and the area charged (never below the minimum). */
+  sqft: number;
+  chargeableSqft: number;
+  /** "Easy Lift (Single Dori / Chain System)" — Settings → Manufacturing. */
+  type?: string;
+  operateSide?: string;
+  /** The shop's own window / serial number on the job card. */
+  serial?: string;
+  note?: string;
+  /** The made-to-measure BOM it was costed with. */
+  bomId?: ID;
+}
+
+/**
+ * A job card — what the karigar works from, one per measured window line
+ * (or made on its own). It moves through Settings → Manufacturing's stages;
+ * reaching the "made" stage records the production run (productionId).
+ */
+export interface JobCard {
+  id: ID;
+  /** WB-0001… (Settings → Manufacturing → job card prefix). */
+  number: string;
+  date: string;
+  dueDate?: string;
+  stage: string;
+  history?: { stage: string; at: string }[];
+  assignedTo?: string;
+  partyId?: ID;
+  partyName: string;
+  partyPhone?: string;
+  partyAddress?: string;
+  /** The quotation / proforma (or bill) and its line this card is for. */
+  sourceKind?: "quotation" | "proforma" | "sale";
+  sourceId?: ID;
+  sourceNumber?: string;
+  lineId?: ID;
+  /** What is made, and how: the finished item and its made-to-measure BOM. */
+  finishedItemId?: ID;
+  finishedItemName: string;
+  bomId?: ID;
+  size: { w: number; h: number; unit: LengthUnit };
+  pieces: number;
+  /** The quantity billed for it (sq ft or pieces) — the production makes
+   *  exactly this, so making and selling net to zero. */
+  qty: number;
+  type?: string;
+  operateSide?: string;
+  serial?: string;
+  note?: string;
+  /** Set once made; null when the run was undone. */
+  productionId?: ID | null;
+  createdAt: string;
 }
 
 export type PaymentMode = "cash" | "bank" | "credit" | "upi" | "cheque";

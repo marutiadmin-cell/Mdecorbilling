@@ -1,9 +1,12 @@
 import { useEffect, useRef, useState } from "react";
-import { useNavigate } from "@tanstack/react-router";
+import { useNavigate, Link } from "@tanstack/react-router";
 import { PageHeader } from "@/components/PageHeader";
 import { Button } from "@/components/ui/button";
 import { PrintableInvoice } from "@/components/PrintableInvoice";
-import { EstimateRepo, CompanyRepo } from "@/repositories";
+import { EstimateRepo, CompanyRepo, JobCardRepo } from "@/repositories";
+import { cardsForOrder, linesWithoutCard } from "@/lib/jobCards";
+import { mtmOf } from "@/lib/mtm";
+import { usePermissions } from "@/hooks/usePermissions";
 import { useRepoData } from "@/hooks/useRepoData";
 import { downloadElementAsPdf } from "@/lib/pdf";
 import { printWithName, isStandalone } from "@/lib/print";
@@ -19,7 +22,7 @@ import { RecordAdvanceDialog } from "@/components/RecordAdvanceDialog";
 import { PaymentRepo } from "@/repositories";
 import { fmtDate, fmtMoney, today } from "@/lib/format";
 import type { Estimate, Invoice, Company } from "@/types";
-import { Printer, Download, Send, FileText, IndianRupee } from "lucide-react";
+import { Printer, Download, Send, FileText, IndianRupee, ClipboardList } from "lucide-react";
 import { toast } from "sonner";
 
 /**
@@ -44,6 +47,7 @@ export function EstimateDetail({ kind, id }: { kind: EstimateKind; id: string })
   const [co, setCo] = useState<Company | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [advanceOpen, setAdvanceOpen] = useState(false);
+  const { isOwner, canEdit } = usePermissions();
 
   useEffect(() => {
     setDoc(EstimateRepo.get(id) ?? null);
@@ -68,6 +72,23 @@ export function EstimateDetail({ kind, id }: { kind: EstimateKind; id: string })
   const takesAdvance = kind === "proforma";
   const advance = advanceAgainst(doc.id, PaymentRepo.all());
   const stillDue = balanceAfterAdvance(doc.total, advance);
+
+  /* Job cards: one per measured window line, for the workshop. Pressing it
+     again only makes cards for lines that have none yet. */
+  const cards = JobCardRepo.all().filter((c) => c.sourceId === doc.id);
+  const waiting = linesWithoutCard(doc, cards);
+  const measured = doc.lineItems.filter((l) => l.size).length;
+  const makeCards = () => {
+    if (!(isOwner || canEdit("masterData")))
+      return void toast.error("You don't have permission to make job cards");
+    const made = cardsForOrder(kind, doc, JobCardRepo.all(), mtmOf(CompanyRepo.get()));
+    for (const c of made) JobCardRepo.add(c as never);
+    toast.success(
+      made.length === 1
+        ? `Job card ${made[0].number} created`
+        : `${made.length} job cards created (${made[0].number}–${made[made.length - 1].number})`,
+    );
+  };
 
   const doPrint = () => {
     if (isStandalone()) return doDownload();
@@ -132,6 +153,11 @@ export function EstimateDetail({ kind, id }: { kind: EstimateKind; id: string })
             <Button onClick={doSend} disabled={!!busy}>
               <Send className="h-4 w-4" /> {busy === "send" ? "Sending…" : "WhatsApp"}
             </Button>
+            {measured > 0 && waiting.length > 0 && (
+              <Button variant="outline" onClick={makeCards} disabled={!!busy}>
+                <ClipboardList className="h-4 w-4" /> Create job cards ({waiting.length})
+              </Button>
+            )}
             {takesAdvance && (
               <Button variant="outline" onClick={() => setAdvanceOpen(true)} disabled={!!busy}>
                 <IndianRupee className="h-4 w-4" /> Advance
@@ -164,6 +190,24 @@ export function EstimateDetail({ kind, id }: { kind: EstimateKind; id: string })
                 "Paid in full"
               )}
             </span>
+          </div>
+        )}
+        {cards.length > 0 && (
+          <div
+            className="mx-auto mb-3 flex max-w-[820px] flex-wrap items-center gap-x-3 gap-y-1 rounded-md border bg-card px-3 py-2.5 text-[13px] shadow-card"
+            data-order-job-cards
+          >
+            <span className="font-semibold">Job cards:</span>
+            {cards.map((c) => (
+              <Link
+                key={c.id}
+                to="/job-cards/$id"
+                params={{ id: c.id }}
+                className="text-primary hover:underline"
+              >
+                {c.number} · {c.stage}
+              </Link>
+            ))}
           </div>
         )}
         {doc.status === "converted" && (

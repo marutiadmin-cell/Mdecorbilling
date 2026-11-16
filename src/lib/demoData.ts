@@ -42,7 +42,8 @@ import { planDataRepair } from "@/lib/dataRepair";
 import { consumptionFor } from "@/lib/production";
 import { consumptionForSize, madeQty, bomVars, resolveComponents } from "@/lib/sizing";
 import { planCuts, lenKey } from "@/lib/cutting";
-import type { PieceCount, PieceSort } from "@/types";
+import type { PieceCount, PieceSort, JobCard } from "@/types";
+import { costSheet } from "@/lib/sizing";
 import { ymd } from "@/lib/format";
 
 const r2 = (n: number) => Math.round(n * 100) / 100;
@@ -70,6 +71,8 @@ export interface DemoShop {
   productions: Production[];
   /** By-length stock (slats, rails) sorted into sizes. */
   pieceSorts: PieceSort[];
+  /** Workshop job cards for the measured blind orders. */
+  jobCards: JobCard[];
   bsAccounts: BsAccount[];
   /** Settings → Manufacturing for made-to-measure work. */
   mtm: MtmSettings;
@@ -479,7 +482,16 @@ export function buildDemoShop(
     const d = date();
     const lines: LineItem[] = Array.from({ length: 1 + ri(4) }, () => {
       const it = pick(isSale ? sellable : buyable);
-      const qty = it.unit === "MTR" ? r2(1 + rnd() * 25) : 1 + ri(6);
+      // Slats and rails are bought BY THE PIECE (20 ft × 7), straight into sizes.
+      const pcs =
+        !isSale && it.pieces
+          ? [{ length: it.pieces.barLength ?? 10, count: 2 + ri(9) }]
+          : undefined;
+      const qty = pcs
+        ? r2(pcs[0].length * pcs[0].count)
+        : it.unit === "MTR"
+          ? r2(1 + rnd() * 25)
+          : 1 + ri(6);
       const price = Number(isSale ? it.salePrice : it.purchasePrice) || 100;
       const discountPct = ri(5) === 0 ? 5 : 0;
       const gstRate = Number(it.gstRate) || 0;
@@ -496,6 +508,7 @@ export function buildDemoShop(
         amount: r2(taxable + (gstOn ? r2((taxable * gstRate) / 100) : 0)),
         costPrice: isSale ? Number(it.purchasePrice) || 0 : undefined,
         hsn: it.hsn,
+        pieces: pcs,
       } as LineItem;
     });
     const subtotal = r2(lines.reduce((a, l) => a + l.qty * l.price, 0));
@@ -626,7 +639,7 @@ export function buildDemoShop(
       partyName: src.partyName,
       originalRef: src.number,
       reason: pick(["damaged", "wrong_item", "other"]),
-      lineItems: [{ ...l, id: id("L"), qty, amount: r2(taxable + tax) }],
+      lineItems: [{ ...l, pieces: undefined, id: id("L"), qty, amount: r2(taxable + tax) }],
       subtotal: taxable,
       taxAmount: tax,
       gstEnabled: src.gstEnabled,
@@ -948,6 +961,108 @@ export function buildDemoShop(
     } as Production);
   }
 
+  /* ── Blind orders measured window by window, and their job cards ── */
+  const jobCards: JobCard[] = [];
+  {
+    const blindItem = byId.get(fixed("DB-BLIND"))!;
+    const types = mtm.productTypes ?? [];
+    const sides = mtm.operateSides ?? [];
+    const stages = (mtm.jobStages ?? []).slice(0, 3); // not yet made
+    let serialNo = 1200;
+    for (let i = 0; i < Math.round(8 * scale); i++) {
+      const party = pick(customers);
+      const d = dayAgo(ri(20));
+      const kind = ri(2) ? "proforma" : "quotation";
+      const windows = 1 + ri(3);
+      const lines: LineItem[] = Array.from({ length: windows }, () => {
+        const size = { w: 30 + ri(60) + pick([0, 0.25, 0.5]), h: 36 + ri(80), unit: "in" as const };
+        const sheet = costSheet(sizedBom, size, byId, (it) => Number(it.purchasePrice) || 0, {
+          minSqft: 15,
+        });
+        const rate = Math.round(sheet.maxRate);
+        const qty = r2(sheet.chargeableSqft);
+        return {
+          id: id("L"),
+          itemId: blindItem.id,
+          name: blindItem.name,
+          qty,
+          unit: blindItem.unit,
+          price: rate,
+          discountPct: 0,
+          gstRate: 0,
+          amount: r2(qty * rate),
+          size: {
+            ...size,
+            pieces: 1,
+            sqft: sheet.sqft,
+            chargeableSqft: sheet.chargeableSqft,
+            type: pick(types),
+            operateSide: pick(sides),
+            serial: String(++serialNo),
+            note: ri(2)
+              ? `${pick(["Kal sanj sudhi", "Somvar sudhi", "Urgent"])} ready kari apva`
+              : undefined,
+            bomId: sizedBom.id,
+          },
+        } as LineItem;
+      });
+      const total = Math.round(lines.reduce((t, l) => t + l.amount, 0));
+      const est = {
+        id: id("ES"),
+        kind,
+        status: "open",
+        number: num(kind === "quotation" ? "QT-" : "PF-", 100 + i),
+        date: d,
+        validUntil: dayAgo(-15),
+        partyId: party.id,
+        partyName: party.name,
+        partyPhone: party.phone,
+        partyAddress: party.address,
+        lineItems: lines,
+        subtotal: r2(lines.reduce((t, l) => t + l.amount, 0)),
+        discount: 0,
+        taxAmount: 0,
+        gstEnabled: false,
+        taxCalcVersion: 2,
+        roundOff: r2(total - lines.reduce((t, l) => t + l.amount, 0)),
+        total,
+        createdAt: createdAt(d),
+      } as Estimate;
+      estimates.push(est);
+      for (const l of lines) {
+        const stage = pick(stages);
+        jobCards.push({
+          id: id("JC"),
+          number: num(mtm.jobPrefix ?? "WB-", jobCards.length + 1),
+          date: d,
+          dueDate: dayAgo(-(1 + ri(6))),
+          stage,
+          history: [{ stage, at: createdAt(d) }],
+          partyId: party.id,
+          partyName: party.name,
+          partyPhone: party.phone,
+          partyAddress: party.address,
+          sourceKind: kind,
+          sourceId: est.id,
+          sourceNumber: est.number,
+          lineId: l.id,
+          finishedItemId: blindItem.id,
+          finishedItemName: blindItem.name,
+          bomId: sizedBom.id,
+          size: { w: l.size!.w, h: l.size!.h, unit: l.size!.unit },
+          pieces: 1,
+          qty: l.qty,
+          type: l.size!.type,
+          operateSide: l.size!.operateSide,
+          serial: l.size!.serial,
+          note: l.size!.note,
+          assignedTo: pick(["Ramesh", "Suresh", "Mahesh"]),
+          createdAt: createdAt(d),
+        } as JobCard);
+      }
+    }
+  }
+
   /* ── Consistent, by the app's own Fix calculations over THESE records ── */
   const data = () => ({
     sales,
@@ -1032,6 +1147,7 @@ export function buildDemoShop(
     boms,
     productions,
     pieceSorts,
+    jobCards,
     bsAccounts,
     mtm,
     expenseCategories,

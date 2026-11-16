@@ -76,6 +76,7 @@ const groups: NavGroup[] = [
     items: [
       { path: "/boms", label: "Bill of Materials", icon: ClipboardList },
       { path: "/productions", label: "Production", icon: Factory },
+      { path: "/job-cards", label: "Job Cards", icon: ClipboardList },
     ],
   },
   // Documents vault hidden for M Décor — uncomment (and the FolderOpen

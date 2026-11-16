@@ -1,5 +1,6 @@
 import type { Invoice, Company } from "@/types";
 import { fmtMoney, fmtDate } from "@/lib/format";
+import { sizeLine } from "@/components/MeasureDialog";
 import { describePayment } from "@/lib/paymentSplit";
 import { fmtMode } from "@/lib/paymentMode";
 
@@ -96,6 +97,7 @@ export function ThermalReceipt({
         <div key={l.id} style={{ marginBottom: 3 }}>
           <div style={{ fontWeight: 700 }}>
             {i + 1}. {l.name}
+            {l.size && <div style={{ fontSize: "0.85em" }}>{sizeLine(l.size)}</div>}
           </div>
           <div style={{ display: "flex", justifyContent: "space-between" }}>
             <span>

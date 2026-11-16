@@ -74,6 +74,12 @@ service cloud.firestore {
       allow delete: if hasPerm('masterData', 'delete');
     }
     // By-length stock sorted into sizes (slats, rails) — moves no stock.
+    // Job cards for the workshop — no stock or money of their own.
+    match /job-cards/{id} {
+      allow read: if hasPerm('masterData', 'view');
+      allow create, update: if hasPerm('masterData', 'edit');
+      allow delete: if hasPerm('masterData', 'delete');
+    }
     match /piece-sorts/{id} {
       allow read: if hasPerm('masterData', 'view');
       allow create, update: if hasPerm('masterData', 'edit');

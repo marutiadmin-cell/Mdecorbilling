@@ -20,7 +20,12 @@ import {
   BankRepo,
   EstimateRepo,
   nextEstimateNumber,
+  BomRepo,
 } from "@/repositories";
+import { MeasureDialog, sizeLine } from "@/components/MeasureDialog";
+import { LinePiecesDialog } from "@/components/LinePiecesDialog";
+import { piecesLabel } from "@/lib/pieces";
+import { piecesLength } from "@/lib/cutting";
 import { partyBalances } from "@/lib/ledger";
 import { correctBankPaidAmount } from "@/lib/bankRepair";
 import { matchesQuery, byRelevance } from "@/lib/search";
@@ -353,6 +358,13 @@ export function InvoiceForm({ mode, existing, initialDocType, fromEstimateId }: 
   const [splitRows, setSplitRows] = useState<PaymentSplit[] | null>(
     () => existing?.paidSplits ?? null,
   );
+  /** The made-to-measure line whose size is being entered. */
+  const [measureLineId, setMeasureLineId] = useState<string | null>(null);
+  /** A by-length line (slats) whose pieces are being entered. */
+  const [piecesLineId, setPiecesLineId] = useState<string | null>(null);
+  /** A blind or curtain: the item is made by a size-based BOM. */
+  const sizedBomOf = (itemId: string) =>
+    BomRepo.all().find((b) => b.finishedItemId === itemId && b.sizing && !b.archived);
   const [quickAddItem, setQuickAddItem] = useState<{
     name: string;
     rowId: string | null;
@@ -745,6 +757,10 @@ export function InvoiceForm({ mode, existing, initialDocType, fromEstimateId }: 
     line.amount = lineAmount(line.qty, line.price, line.discountPct, line.gstRate, gstOn);
     const lines = [...inv.lineItems, line];
     setInv({ ...inv, lineItems: lines, ...recalc(lines) });
+    // A blind / curtain is sold by its size: ask for it straight away.
+    if (isSale && sizedBomOf(it.id)) setMeasureLineId(line.id);
+    // Slats bought by the piece: ask what pieces, so they go into sizes.
+    else if (!isSale && it.pieces) setPiecesLineId(line.id);
     return line.id;
   };
 
@@ -775,6 +791,15 @@ export function InvoiceForm({ mode, existing, initialDocType, fromEstimateId }: 
     const lines = inv.lineItems.map((l) => {
       if (l.id !== id) return l;
       const nl = { ...l, ...patch };
+      // Pieces say what the qty is made of — a qty typed over them that no
+      // longer adds up leaves the line by the foot instead of disagreeing.
+      if (
+        "qty" in patch &&
+        !("pieces" in patch) &&
+        nl.pieces?.length &&
+        Math.abs(piecesLength(nl.pieces) - nl.qty) > 0.005
+      )
+        nl.pieces = undefined;
       // Clamp so a mistyped discount (e.g. 500 instead of 50) or a negative
       // GST rate can never flip the line amount negative.
       nl.discountPct = Math.min(100, Math.max(0, nl.discountPct));
@@ -2046,6 +2071,32 @@ export function InvoiceForm({ mode, existing, initialDocType, fromEstimateId }: 
                           setQuickAddItem({ name, rowId: null, replaceLineId: l.id })
                         }
                       />
+                      {isSale && sizedBomOf(l.itemId) && (
+                        <button
+                          type="button"
+                          onClick={() => setMeasureLineId(l.id)}
+                          className="mt-0.5 block text-left text-[11px] leading-snug text-primary hover:underline"
+                          aria-label="Measure size"
+                          data-size-for={l.id}
+                        >
+                          {l.size ? `📐 ${sizeLine(l.size)}` : "📐 Add size (W × H)"}
+                        </button>
+                      )}
+                      {items.find((x) => x.id === l.itemId)?.pieces && (
+                        <button
+                          type="button"
+                          onClick={() => setPiecesLineId(l.id)}
+                          className="mt-0.5 block text-left text-[11px] leading-snug text-primary hover:underline"
+                          aria-label="Line pieces"
+                          data-pieces-for={l.id}
+                        >
+                          {l.pieces?.length
+                            ? `✂ ${piecesLabel(l.pieces, l.unit)}`
+                            : isSale
+                              ? "✂ Pieces (optional)"
+                              : "✂ Pieces bought"}
+                        </button>
+                      )}
                     </td>
                     <td className="py-1.5 px-1">
                       <input
@@ -2217,6 +2268,32 @@ export function InvoiceForm({ mode, existing, initialDocType, fromEstimateId }: 
                         setQuickAddItem({ name, rowId: null, replaceLineId: l.id })
                       }
                     />
+                    {isSale && sizedBomOf(l.itemId) && (
+                      <button
+                        type="button"
+                        onClick={() => setMeasureLineId(l.id)}
+                        className="mt-0.5 block text-left text-[11px] leading-snug text-primary hover:underline"
+                        aria-label="Measure size"
+                        data-size-for={l.id}
+                      >
+                        {l.size ? `📐 ${sizeLine(l.size)}` : "📐 Add size (W × H)"}
+                      </button>
+                    )}
+                    {items.find((x) => x.id === l.itemId)?.pieces && (
+                      <button
+                        type="button"
+                        onClick={() => setPiecesLineId(l.id)}
+                        className="mt-0.5 block text-left text-[11px] leading-snug text-primary hover:underline"
+                        aria-label="Line pieces"
+                        data-pieces-for={l.id}
+                      >
+                        {l.pieces?.length
+                          ? `✂ ${piecesLabel(l.pieces, l.unit)}`
+                          : isSale
+                            ? "✂ Pieces (optional)"
+                            : "✂ Pieces bought"}
+                      </button>
+                    )}
                   </div>
                   <button
                     type="button"
@@ -2716,6 +2793,30 @@ export function InvoiceForm({ mode, existing, initialDocType, fromEstimateId }: 
         initialPhone={quickAddParty?.phone}
         onSaved={() => {}}
         onCreated={onQuickPartyCreated}
+      />
+      <LinePiecesDialog
+        line={inv.lineItems.find((x) => x.id === piecesLineId) ?? null}
+        item={items.find((x) => x.id === inv.lineItems.find((y) => y.id === piecesLineId)?.itemId)}
+        onClose={() => setPiecesLineId(null)}
+        onSave={(patch) => {
+          if (piecesLineId) updateLine(piecesLineId, patch);
+          setPiecesLineId(null);
+        }}
+      />
+      <MeasureDialog
+        line={inv.lineItems.find((x) => x.id === measureLineId) ?? null}
+        item={items.find((x) => x.id === inv.lineItems.find((y) => y.id === measureLineId)?.itemId)}
+        bom={(() => {
+          const ln = inv.lineItems.find((x) => x.id === measureLineId);
+          return ln ? sizedBomOf(ln.itemId) : undefined;
+        })()}
+        itemsById={new Map(items.map((x) => [x.id, x] as const))}
+        rateOf={itemCost}
+        onClose={() => setMeasureLineId(null)}
+        onSave={(patch) => {
+          if (measureLineId) updateLine(measureLineId, patch);
+          setMeasureLineId(null);
+        }}
       />
       <ItemDialog
         open={!!quickAddItem}

@@ -21,6 +21,7 @@ import { Route as FinancialsRouteImport } from './routes/financials'
 import { Route as GstRouteImport } from './routes/gst'
 import { Route as InventoryRouteImport } from './routes/inventory'
 import { Route as ItemsRouteImport } from './routes/items'
+import { Route as JobCardsRouteImport } from './routes/job-cards'
 import { Route as JournalVouchersRouteImport } from './routes/journal-vouchers'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as PartiesRouteImport } from './routes/parties'
@@ -33,6 +34,7 @@ import { Route as ReportsRouteImport } from './routes/reports'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as BankIdRouteImport } from './routes/bank_.$id'
 import { Route as ItemsIdRouteImport } from './routes/items_.$id'
+import { Route as JobCardsIdRouteImport } from './routes/job-cards_.$id'
 import { Route as PartiesIdRouteImport } from './routes/parties_.$id'
 import { Route as PayeesIdRouteImport } from './routes/payees_.$id'
 import { Route as ProformaIdRouteImport } from './routes/proforma_.$id'
@@ -112,6 +114,11 @@ const ItemsRoute = ItemsRouteImport.update({
   path: '/items',
   getParentRoute: () => rootRouteImport,
 } as any)
+const JobCardsRoute = JobCardsRouteImport.update({
+  id: '/job-cards',
+  path: '/job-cards',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const JournalVouchersRoute = JournalVouchersRouteImport.update({
   id: '/journal-vouchers',
   path: '/journal-vouchers',
@@ -170,6 +177,11 @@ const BankIdRoute = BankIdRouteImport.update({
 const ItemsIdRoute = ItemsIdRouteImport.update({
   id: '/items_/$id',
   path: '/items/$id',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const JobCardsIdRoute = JobCardsIdRouteImport.update({
+  id: '/job-cards_/$id',
+  path: '/job-cards/$id',
   getParentRoute: () => rootRouteImport,
 } as any)
 const PartiesIdRoute = PartiesIdRouteImport.update({
@@ -276,6 +288,7 @@ export interface FileRoutesByFullPath {
   '/gst': typeof GstRoute
   '/inventory': typeof InventoryRoute
   '/items': typeof ItemsRoute
+  '/job-cards': typeof JobCardsRoute
   '/journal-vouchers': typeof JournalVouchersRoute
   '/login': typeof LoginRoute
   '/parties': typeof PartiesRoute
@@ -288,6 +301,7 @@ export interface FileRoutesByFullPath {
   '/settings': typeof SettingsRoute
   '/bank/$id': typeof BankIdRoute
   '/items/$id': typeof ItemsIdRoute
+  '/job-cards/$id': typeof JobCardsIdRoute
   '/parties/$id': typeof PartiesIdRoute
   '/payees/$id': typeof PayeesIdRoute
   '/proforma/$id': typeof ProformaIdRoute
@@ -320,6 +334,7 @@ export interface FileRoutesByTo {
   '/gst': typeof GstRoute
   '/inventory': typeof InventoryRoute
   '/items': typeof ItemsRoute
+  '/job-cards': typeof JobCardsRoute
   '/journal-vouchers': typeof JournalVouchersRoute
   '/login': typeof LoginRoute
   '/parties': typeof PartiesRoute
@@ -332,6 +347,7 @@ export interface FileRoutesByTo {
   '/settings': typeof SettingsRoute
   '/bank/$id': typeof BankIdRoute
   '/items/$id': typeof ItemsIdRoute
+  '/job-cards/$id': typeof JobCardsIdRoute
   '/parties/$id': typeof PartiesIdRoute
   '/payees/$id': typeof PayeesIdRoute
   '/proforma/$id': typeof ProformaIdRoute
@@ -365,6 +381,7 @@ export interface FileRoutesById {
   '/gst': typeof GstRoute
   '/inventory': typeof InventoryRoute
   '/items': typeof ItemsRoute
+  '/job-cards': typeof JobCardsRoute
   '/journal-vouchers': typeof JournalVouchersRoute
   '/login': typeof LoginRoute
   '/parties': typeof PartiesRoute
@@ -377,6 +394,7 @@ export interface FileRoutesById {
   '/settings': typeof SettingsRoute
   '/bank_/$id': typeof BankIdRoute
   '/items_/$id': typeof ItemsIdRoute
+  '/job-cards_/$id': typeof JobCardsIdRoute
   '/parties_/$id': typeof PartiesIdRoute
   '/payees_/$id': typeof PayeesIdRoute
   '/proforma_/$id': typeof ProformaIdRoute
@@ -411,6 +429,7 @@ export interface FileRouteTypes {
     | '/gst'
     | '/inventory'
     | '/items'
+    | '/job-cards'
     | '/journal-vouchers'
     | '/login'
     | '/parties'
@@ -423,6 +442,7 @@ export interface FileRouteTypes {
     | '/settings'
     | '/bank/$id'
     | '/items/$id'
+    | '/job-cards/$id'
     | '/parties/$id'
     | '/payees/$id'
     | '/proforma/$id'
@@ -455,6 +475,7 @@ export interface FileRouteTypes {
     | '/gst'
     | '/inventory'
     | '/items'
+    | '/job-cards'
     | '/journal-vouchers'
     | '/login'
     | '/parties'
@@ -467,6 +488,7 @@ export interface FileRouteTypes {
     | '/settings'
     | '/bank/$id'
     | '/items/$id'
+    | '/job-cards/$id'
     | '/parties/$id'
     | '/payees/$id'
     | '/proforma/$id'
@@ -499,6 +521,7 @@ export interface FileRouteTypes {
     | '/gst'
     | '/inventory'
     | '/items'
+    | '/job-cards'
     | '/journal-vouchers'
     | '/login'
     | '/parties'
@@ -511,6 +534,7 @@ export interface FileRouteTypes {
     | '/settings'
     | '/bank_/$id'
     | '/items_/$id'
+    | '/job-cards_/$id'
     | '/parties_/$id'
     | '/payees_/$id'
     | '/proforma_/$id'
@@ -544,6 +568,7 @@ export interface RootRouteChildren {
   GstRoute: typeof GstRoute
   InventoryRoute: typeof InventoryRoute
   ItemsRoute: typeof ItemsRoute
+  JobCardsRoute: typeof JobCardsRoute
   JournalVouchersRoute: typeof JournalVouchersRoute
   LoginRoute: typeof LoginRoute
   PartiesRoute: typeof PartiesRoute
@@ -556,6 +581,7 @@ export interface RootRouteChildren {
   SettingsRoute: typeof SettingsRoute
   BankIdRoute: typeof BankIdRoute
   ItemsIdRoute: typeof ItemsIdRoute
+  JobCardsIdRoute: typeof JobCardsIdRoute
   PartiesIdRoute: typeof PartiesIdRoute
   PayeesIdRoute: typeof PayeesIdRoute
   ProformaIdRoute: typeof ProformaIdRoute
@@ -662,6 +688,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ItemsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/job-cards': {
+      id: '/job-cards'
+      path: '/job-cards'
+      fullPath: '/job-cards'
+      preLoaderRoute: typeof JobCardsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/journal-vouchers': {
       id: '/journal-vouchers'
       path: '/journal-vouchers'
@@ -744,6 +777,13 @@ declare module '@tanstack/react-router' {
       path: '/items/$id'
       fullPath: '/items/$id'
       preLoaderRoute: typeof ItemsIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/job-cards_/$id': {
+      id: '/job-cards_/$id'
+      path: '/job-cards/$id'
+      fullPath: '/job-cards/$id'
+      preLoaderRoute: typeof JobCardsIdRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/parties_/$id': {
@@ -888,6 +928,7 @@ const rootRouteChildren: RootRouteChildren = {
   GstRoute: GstRoute,
   InventoryRoute: InventoryRoute,
   ItemsRoute: ItemsRoute,
+  JobCardsRoute: JobCardsRoute,
   JournalVouchersRoute: JournalVouchersRoute,
   LoginRoute: LoginRoute,
   PartiesRoute: PartiesRoute,
@@ -900,6 +941,7 @@ const rootRouteChildren: RootRouteChildren = {
   SettingsRoute: SettingsRoute,
   BankIdRoute: BankIdRoute,
   ItemsIdRoute: ItemsIdRoute,
+  JobCardsIdRoute: JobCardsIdRoute,
   PartiesIdRoute: PartiesIdRoute,
   PayeesIdRoute: PayeesIdRoute,
   ProformaIdRoute: ProformaIdRoute,

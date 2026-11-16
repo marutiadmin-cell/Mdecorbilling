@@ -27,7 +27,7 @@ import type {
   Return,
   StockAdjustment,
 } from "@/types";
-import { lenKey, piecesLength } from "@/lib/cutting";
+import { lenKey, piecesLength, sizeKey } from "@/lib/cutting";
 
 export interface PieceData {
   stockAdjustments: StockAdjustment[];
@@ -77,7 +77,11 @@ function take(st: State, qty: number) {
     if (fit) {
       inc(st, fit[0], -1);
       const left = lenKey(fit[0] - r);
-      if (left > 0.00005) inc(st, left, 1);
+      // Kept at its label (to the hundredth, rounded down); the sliver stays
+      // in stock as unsorted length.
+      const label = sizeKey(left);
+      if (label > 0) inc(st, label, 1);
+      st.loose = lenKey(st.loose + (left - label));
       return;
     }
     const [longest] = on[on.length - 1];
@@ -145,24 +149,23 @@ export function allBags(
     for (const l of p.components ?? [])
       if (!cutItems.has(l.itemId)) on(l.itemId, p.date, p.createdAt, OUT, (st) => take(st, l.qty));
   }
-  const lines = (
-    docs: (Invoice | Return)[] | undefined,
-    rank: number,
-    fn: (st: State, qty: number) => void,
-  ) => {
+  // Bill lines: pieces named ("20 ft × 50") → exactly those sizes;
+  // otherwise by the foot (in: unsorted; out: unsorted first, then pieces).
+  const lines = (docs: (Invoice | Return)[] | undefined, rank: number, sign: 1 | -1) => {
     for (const d of docs ?? []) {
       if ((d as Return).isAdjustmentOnly) continue;
       for (const l of d.lineItems ?? [])
-        on(l.itemId, d.date, d.createdAt, rank, (st) => fn(st, Number(l.qty) || 0));
+        on(l.itemId, d.date, d.createdAt, rank, (st) => {
+          if (l.pieces?.length) for (const p of l.pieces) inc(st, p.length, sign * p.count);
+          else if (sign > 0) st.loose = lenKey(st.loose + (Number(l.qty) || 0));
+          else take(st, Number(l.qty) || 0);
+        });
     }
   };
-  const into = (st: State, q: number) => {
-    st.loose = lenKey(st.loose + q);
-  };
-  lines(data.purchases, IN, into);
-  lines(data.saleReturns, IN, into);
-  lines(data.sales, OUT, take);
-  lines(data.purchaseReturns, OUT, take);
+  lines(data.purchases, IN, 1);
+  lines(data.saleReturns, IN, 1);
+  lines(data.sales, OUT, -1);
+  lines(data.purchaseReturns, OUT, -1);
 
   evs.sort(
     (a, b) => a.date.localeCompare(b.date) || a.rank - b.rank || a.created.localeCompare(b.created),
@@ -170,11 +173,21 @@ export function allBags(
   for (const e of evs) e.apply();
 
   for (const [id, st] of states) {
-    const pieces = [...st.sizes]
+    // One row per size AS LABELLED: records kept at 4 decimals (older runs)
+    // merge with their twins, the difference staying in unsorted.
+    const merged = new Map<number, number>();
+    let dust = 0;
+    for (const [length, count] of st.sizes) {
+      if (!count) continue;
+      const label = sizeKey(length);
+      merged.set(label, (merged.get(label) ?? 0) + count);
+      dust += (length - label) * count;
+    }
+    const pieces = [...merged]
       .filter(([, count]) => count !== 0)
       .map(([length, count]) => ({ length, count }))
       .sort((a, b) => b.length - a.length);
-    out.set(id, { pieces, sized: piecesLength(pieces), loose: lenKey(st.loose) });
+    out.set(id, { pieces, sized: piecesLength(pieces), loose: lenKey(st.loose + dust) });
   }
   return out;
 }

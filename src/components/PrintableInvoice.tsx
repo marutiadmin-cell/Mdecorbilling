@@ -1,5 +1,7 @@
 import type { Invoice, Company } from "@/types";
 import { fmtMoney, fmtDate } from "@/lib/format";
+import { sizeLine } from "@/components/MeasureDialog";
+import { piecesLabel } from "@/lib/pieces";
 import { describePayment } from "@/lib/paymentSplit";
 import { fmtMode } from "@/lib/paymentMode";
 
@@ -258,28 +260,28 @@ export function PrintableInvoice({
         // header height, not a font-proportional spacing value.
         <div style={{ height: `${40 * scale}mm` }} />
       ) : (
-      <div
-        style={{
-          textAlign: "center",
-          borderBottom: "2px solid #000",
-          paddingBottom: s(8),
-          marginBottom: s(8),
-        }}
-      >
-        <div style={{ fontSize: s(10), fontWeight: 700, letterSpacing: s(1.5) }}>{title}</div>
-        <div style={{ fontSize: s(22), fontWeight: 800, marginTop: s(3) }}>
-          {company.name || "Your Company"}
+        <div
+          style={{
+            textAlign: "center",
+            borderBottom: "2px solid #000",
+            paddingBottom: s(8),
+            marginBottom: s(8),
+          }}
+        >
+          <div style={{ fontSize: s(10), fontWeight: 700, letterSpacing: s(1.5) }}>{title}</div>
+          <div style={{ fontSize: s(22), fontWeight: 800, marginTop: s(3) }}>
+            {company.name || "Your Company"}
+          </div>
+          {company.address && <div style={{ fontSize: s(11) }}>{company.address}</div>}
+          <div style={{ fontSize: s(11) }}>
+            {company.phone && <>Phone: {company.phone}</>}
+            {company.phone && company.email && " · "}
+            {company.email && <>Email: {company.email}</>}
+          </div>
+          {gstOn && company.gstin && (
+            <div style={{ fontSize: s(11), fontWeight: 600 }}>GSTIN: {company.gstin}</div>
+          )}
         </div>
-        {company.address && <div style={{ fontSize: s(11) }}>{company.address}</div>}
-        <div style={{ fontSize: s(11) }}>
-          {company.phone && <>Phone: {company.phone}</>}
-          {company.phone && company.email && " · "}
-          {company.email && <>Email: {company.email}</>}
-        </div>
-        {gstOn && company.gstin && (
-          <div style={{ fontSize: s(11), fontWeight: 600 }}>GSTIN: {company.gstin}</div>
-        )}
-      </div>
       )}
 
       {/* Party + Invoice meta */}
@@ -392,7 +394,20 @@ export function PrintableInvoice({
             return (
               <tr key={l.id}>
                 <td style={{ ...cellStyle, textAlign: "center" }}>{i + 1}</td>
-                <td style={cellStyle}>{l.name}</td>
+                <td style={cellStyle}>
+                  {l.name}
+                  {/* Made to measure: the window it is for. */}
+                  {l.size && (
+                    <div style={{ fontSize: s(9), color: "#555", marginTop: 1 }}>
+                      {sizeLine(l.size)}
+                    </div>
+                  )}
+                  {l.pieces?.length ? (
+                    <div style={{ fontSize: s(9), color: "#555", marginTop: 1 }}>
+                      {piecesLabel(l.pieces, l.unit)}
+                    </div>
+                  ) : null}
+                </td>
                 {showHsn && <td style={cellStyle}>{l.hsn ?? ""}</td>}
                 <td style={{ ...cellStyle, textAlign: "right" }}>{l.qty}</td>
                 <td style={cellStyle}>{l.unit}</td>
