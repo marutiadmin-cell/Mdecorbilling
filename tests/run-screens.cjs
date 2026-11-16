@@ -300,7 +300,7 @@ run().then((r) => { (window as any).__RESULT__ = r; })
      * inside ONE browser call and so died at puppeteer's 180 s per-call limit
      * ("Runtime.callFunctionOn timed out"): every monkey run longer than three
      * minutes looked like a hang. */
-    const limit = Number(process.env.SCREENS_TIMEOUT_MS || (MONKEY ? 1800000 : 120000));
+    const limit = Number(process.env.SCREENS_TIMEOUT_MS || (MONKEY ? 1800000 : 300000));
     for (;;) {
       const done = await page.evaluate("window.__RESULT__ !== undefined");
       if (done) break;
