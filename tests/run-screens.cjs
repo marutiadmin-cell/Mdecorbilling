@@ -70,7 +70,10 @@ const stubs = {
 
 /* SCREENS_FILE=monkey.test.tsx runs another suite through the same harness. */
 const MONKEY = process.argv[2] === "monkey";
-const TEST_FILE = process.env.SCREENS_FILE || (MONKEY ? "monkey.test.tsx" : "screens.test.tsx");
+const FULLSHOP = process.argv[2] === "fullshop";
+const TEST_FILE =
+  process.env.SCREENS_FILE ||
+  (MONKEY ? "monkey.test.tsx" : FULLSHOP ? "fullshop.test.tsx" : "screens.test.tsx");
 
 async function main() {
   fs.mkdirSync(OUT_DIR, { recursive: true });
@@ -278,10 +281,12 @@ run().then((r) => { (window as any).__RESULT__ = r; })
   });
 
   // The monkey test reads its seed and length from here, so a run replays.
-  await page.evaluateOnNewDocument((seed, steps) => {
+  await page.evaluateOnNewDocument((seed, steps, data, scale) => {
     if (seed) globalThis.__MONKEY_SEED__ = Number(seed);
     if (steps) globalThis.__MONKEY_STEPS__ = Number(steps);
-  }, process.env.MONKEY_SEED || "", process.env.MONKEY_STEPS || "");
+    if (data) globalThis.__MONKEY_DATA__ = data;
+    if (scale) globalThis.__SHOP_SCALE__ = Number(scale);
+  }, process.env.MONKEY_SEED || "", process.env.MONKEY_STEPS || "", process.env.MONKEY_DATA || "", process.env.SHOP_SCALE || "");
 
   /* A test page must never navigate: if the APP reloads or follows a link
    * mid-run, the shop would lose what was on screen — record it. */

@@ -24,6 +24,15 @@ export const NumInput = forwardRef<
 ) {
   const [text, setText] = useState(value === 0 ? "" : String(value));
   const lastNum = useRef(value);
+  /* How many keystrokes this box has sent up, and how many there had been
+     when THIS render began. A render can begin, commit, and have its effect
+     run only later — and if the person typed in between, that render's
+     `value` is from BEFORE their keystroke. Re-syncing to it ate the
+     keystroke: typing 750 into a payment amount saved 70, when a slow
+     render (a big shop's party balance) straddled the "5". Found by the
+     monkey test. A clamp is unaffected: it renders AFTER the keystroke. */
+  const keystrokes = useRef(0);
+  const keystrokesAtRender = keystrokes.current;
 
   // Re-sync display when the value differs from what was last typed (new
   // line added, "Full" button, clamping…). Runs on EVERY render — a clamp
@@ -35,6 +44,9 @@ export const NumInput = forwardRef<
   // stops this looping: setText only fires when the prop genuinely moved.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
+    // Typed into since this render began: its value is stale — the render
+    // after the keystroke carries the right one and syncs then.
+    if (keystrokesAtRender !== keystrokes.current) return;
     if (value !== lastNum.current) {
       setText(value === 0 ? "" : String(value));
       lastNum.current = value;
@@ -52,6 +64,7 @@ export const NumInput = forwardRef<
         const t = e.target.value;
         const ok = allowNegative ? /^-?\d*\.?\d*$/.test(t) : /^\d*\.?\d*$/.test(t);
         if (!ok) return; // digits + at most one dot (+ optional leading minus)
+        keystrokes.current++;
         setText(t);
         const n = parseFloat(t);
         lastNum.current = isNaN(n) ? 0 : n;

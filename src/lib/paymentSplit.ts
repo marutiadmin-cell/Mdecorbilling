@@ -193,7 +193,9 @@ export function splitProblems(rows: PaymentSplit[], total: number): SplitProblem
   // Half a paisa of float dust is not a disagreement.
   if (Math.abs(sum - r2(total)) > 0.005)
     out.push({
-      message: `The rows add up to ${sum.toFixed(2)} but the amount received is ${r2(total).toFixed(2)}`,
+      // Neutral wording: the same check guards a sale (received), a
+      // purchase and an expense (paid) and a receipt or payment.
+      message: `The split rows add up to ${sum.toFixed(2)} but the amount is ${r2(total).toFixed(2)} — change the rows so they match`,
     });
 
   return out;

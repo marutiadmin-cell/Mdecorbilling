@@ -29,9 +29,12 @@ import { type ReactNode } from "react";
 import { createRouter, createMemoryHistory, RouterProvider, Outlet } from "@tanstack/react-router";
 import { QueryClient } from "@tanstack/react-query";
 import { routeTree } from "@/routeTree.gen";
+import { seedDemoShop } from "./demoShop";
+import { bookProblems } from "./books";
 import { Toaster } from "@/components/ui/sonner";
 import { planDataRepair } from "@/lib/dataRepair";
 import { consumptionFor } from "@/lib/production";
+import { consumptionForSize } from "@/lib/sizing";
 import { buildPostings, unbalancedDocs, balances, rupees, ACC } from "@/lib/postings";
 import { buildFinancials } from "@/lib/financials";
 import { booksData, finInputFromRepos } from "@/lib/finData";
@@ -387,18 +390,26 @@ const ITEMS: Array<Partial<Item> & { id: string; name: string }> = [
 const FINISHED = ["FG-SOFA3", "FG-SOFA2", "FG-BLIND"];
 const RAWS = ITEMS.filter((i) => !FINISHED.includes(i.id) && i.id !== "TR-CUSH").map((i) => i.id);
 
+/** MONKEY_DATA=big: start from a whole dummy shop (tests/demoShop.ts) — every
+ *  action then works among hundreds of existing records. */
+const BIG = (globalThis as { __MONKEY_DATA__?: string }).__MONKEY_DATA__ === "big";
+
 function seed() {
-  CompanyRepo.save({
-    name: "M DECOR",
-    gstin: "24AAACC1234D1ZI",
-    currency: "INR",
-    invoicePrefix: "INV-",
-    purchasePrefix: "PUR-",
-    enableGst: false,
-    allowNegativeStock: true,
-    expenseCategories: ["Rent", "Karigar wages", "Transport"],
-  } as never);
+  if (BIG) seedDemoShop({ scale: 1, seed: SEED });
+  if (!BIG)
+    CompanyRepo.save({
+      name: "M DECOR",
+      gstin: "24AAACC1234D1ZI",
+      currency: "INR",
+      invoicePrefix: "INV-",
+      purchasePrefix: "PUR-",
+      enableGst: false,
+      allowNegativeStock: true,
+      expenseCategories: ["Rent", "Karigar wages", "Transport"],
+    } as never);
   for (const it of ITEMS) {
+    // The app refuses duplicate item names; the big shop already has some.
+    if (BIG && ItemRepo.all().some((x) => x.name === it.name)) continue;
     ItemRepo.add({
       gstRate: 0,
       salePrice: 0,
@@ -416,13 +427,15 @@ function seed() {
     { id: "B-BOTH", name: "Patel Traders", type: "both" },
   ])
     PartyRepo.add({ openingBalance: 0, createdAt: "2026-01-01T00:00:00Z", ...p } as never);
-  BankRepo.add({
-    id: "BANK-HDFC",
-    name: "HDFC Current",
-    openingBalance: 50000,
-    balance: 50000,
-    createdAt: "2026-01-01T00:00:00Z",
-  } as never);
+  // The big shop already has "HDFC Current" under the same id.
+  if (!BIG)
+    BankRepo.add({
+      id: "BANK-HDFC",
+      name: "HDFC Current",
+      openingBalance: 50000,
+      balance: 50000,
+      createdAt: "2026-01-01T00:00:00Z",
+    } as never);
 }
 const customers = () => PartyRepo.all().filter((p) => !p.archived && p.type !== "supplier");
 const suppliers = () => PartyRepo.all().filter((p) => !p.archived && p.type !== "customer");
@@ -437,65 +450,9 @@ const fyStart = (() => {
 })();
 
 function checkBooks() {
-  const plan = planDataRepair({
-    sales: SalesRepo.all(),
-    purchases: PurchaseRepo.all(),
-    payments: PaymentRepo.all(),
-    banks: BankRepo.all(),
-    bankTxns: BankTxnRepo.all(),
-    expenses: ExpenseRepo.all(),
-    items: ItemRepo.all(),
-    saleReturns: SaleReturnRepo.all(),
-    purchaseReturns: PurchaseReturnRepo.all(),
-    stockAdjustments: StockAdjustmentRepo.all(),
-    productions: ProductionRepo.all(),
-    journalVouchers: JournalVoucherRepo.all(),
-  });
-  // A correction of 0 only rewrites "40" (text) as 40 — noted, not a failure.
-  const realStock = plan.items.filter((c) => Math.abs(num(c.delta)) >= 0.005);
-  assert(
-    realStock.length === 0,
-    `Fix calculations would correct stock: ${realStock.map((c) => `${c.name} ${c.stored}→${c.correct}`).join("; ")}`,
-  );
-  assert(
-    plan.bills.length === 0,
-    `Fix calculations would correct bills: ${JSON.stringify(plan.bills).slice(0, 300)}`,
-  );
-  assert(
-    plan.accounts.length === 0,
-    `Fix calculations would correct bank balances: ${JSON.stringify(plan.accounts).slice(0, 300)}`,
-  );
-
-  const books = buildPostings(booksData());
-  const off = unbalancedDocs(books.postings);
-  assert(
-    off.length === 0,
-    `documents whose postings do not balance: ${JSON.stringify(off).slice(0, 300)}`,
-  );
-  const fin = buildFinancials(finInputFromRepos(), fyStart, today);
-  assert(Math.abs(fin.difference) < 0.01, `balance sheet difference is ${fin.difference}, not 0`);
-
-  const bal = balances(books.postings, today);
-  for (const pos of netPartyPositions(PartyRepo.all(), {
-    sales: SalesRepo.all(),
-    purchases: PurchaseRepo.all(),
-    saleReturns: SaleReturnRepo.all(),
-    purchaseReturns: PurchaseReturnRepo.all(),
-    payments: PaymentRepo.all(),
-    journalVouchers: JournalVoucherRepo.all(),
-  })) {
-    const posted = rupees(bal.get(ACC.party(pos.partyId)) ?? 0);
-    assert(
-      close(pos.net, posted),
-      `${pos.name}: the party balance says ${pos.net}, the books say ${posted}`,
-    );
-  }
-  for (const inv of [...SalesRepo.all(), ...PurchaseRepo.all()]) {
-    assert(
-      num(inv.paid) >= -0.005 && num(inv.paid) <= num(inv.total) + 0.011,
-      `${inv.number}: paid ${inv.paid} of ${inv.total}`,
-    );
-  }
+  // The same whole-book checks the full-shop test runs (tests/books.ts).
+  const problems = bookProblems();
+  assert(problems.length === 0, problems.slice(0, 4).join(" | "));
 }
 
 /* ── actions: items & parties ──────────────────────────────────────────── */
@@ -759,6 +716,14 @@ async function editBill(kind: "sale" | "purchase") {
   await wait(400);
   const after = repo.get(inv.id);
   const l2 = after?.lineItems.find((l) => l.id === line.id);
+  // A split-paid bill cut below what was paid is REFUSED on purpose — only
+  // the shop knows which part (cash or bank) to reduce. That is correct.
+  if (toasts().some((t) => /split rows add up to/.test(t))) {
+    notes.push(
+      `${inv.number}: lowering a split-paid bill below its payment was refused, as it should be`,
+    );
+    return;
+  }
   assert(
     close(num(l2?.qty), newQty),
     `${inv.number}: qty ${l2?.qty}, typed ${newQty} — toasts ${JSON.stringify(toasts())}`,
@@ -805,7 +770,8 @@ async function createPayment(dir: "in" | "out") {
   const dlg = dialog();
   const party = pick(dir === "in" ? customers() : suppliers());
   const box = dlg?.querySelector('input[placeholder="Type to search party…"]');
-  await typeInto(box, party.name.slice(0, 7), "payment party");
+  // Enough of the name to find it among many similar ones, as a person would.
+  await typeInto(box, party.name, "payment party");
   const opt = Array.from(document.querySelectorAll("div"))
     .filter((d) => d.textContent === party.name)
     .pop();
@@ -814,8 +780,17 @@ async function createPayment(dir: "in" | "out") {
   const amountBox = dialog()?.querySelector(
     `input[aria-label="${dir === "in" ? "Amount received" : "Amount paid"}"]`,
   );
+  // Every value the box passes through while typing — a lost keystroke shows
+  // up as the value stepping BACK, and this says exactly when.
+  const trail: string[] = [];
+  const amtEl = amountBox as HTMLInputElement | null;
+  const onInput = () => trail.push(`input:"${amtEl?.value}"`);
+  amtEl?.addEventListener("input", onInput);
   await typeInto(amountBox, String(amount), "payment amount");
-  const shown = (amountBox as HTMLInputElement | null)?.value;
+  amtEl?.removeEventListener("input", onInput);
+  const shown = amtEl?.value;
+  if (shown !== String(amount))
+    assert(false, `payment amount box: typed ${amount}, it shows ${shown} — ${trail.join(" ")}`);
   await click(dialog()?.querySelector('[data-mode="cash"]'), "payment mode cash");
   await clearToasts();
   await click(button(dialog(), dir === "in" ? /Confirm Receipt/ : /Confirm Payment/), "Confirm");
@@ -840,11 +815,8 @@ async function deletePayment() {
   const p = pick(PaymentRepo.all());
   if (!p) return;
   await go("/payments");
-  const row = Array.from(document.querySelectorAll("tr")).find(
-    (r) =>
-      (r.textContent ?? "").includes(p.partyName) &&
-      r.querySelector('button[title="Delete payment"]'),
-  );
+  // The visible one — a phone shows cards, the table is there but hidden.
+  const row = rowWith(p.partyName);
   if (!row) return;
   await click(
     row.querySelector('button[title="Delete payment"]'),
@@ -870,6 +842,7 @@ async function createExpense() {
     "paid to",
   );
   await window.__realKey("Tab");
+  await wait(250); // the suggestions close a moment after leaving the box
   const amount = pick([350, 1200, 5000]);
   await typeInto(field(dialog(), "Amount *"), String(amount), "expense amount");
   await click(dialog()?.querySelector('[data-mode="cash"]'), "expense mode cash");
@@ -972,17 +945,20 @@ async function editBom() {
   await go("/boms");
   if (
     !(await click(
-        // A phone has no pencil — tapping the card opens it.
-        rowWith(b.name)?.querySelector('button[title="Edit BOM"]') ?? rowWith(b.name),
-        `edit "${b.name}"`,
-      ))
+      // A phone has no pencil — tapping the card opens it.
+      rowWith(b.name)?.querySelector('button[title="Edit BOM"]') ?? rowWith(b.name),
+      `edit "${b.name}"`,
+    ))
   )
     return;
   const dlg = dialog();
   const i = between(0, Math.max(0, b.components.length - 1));
   const newQty = pick([1.5, 2, 6, 9.25]);
+  // A made-to-measure BOM has a formula box; a plain number is a formula too.
   await typeInto(
-    dlg?.querySelectorAll('input[aria-label="Material quantity"]')[i],
+    dlg?.querySelectorAll(
+      b.sizing ? 'input[aria-label="Quantity formula"]' : 'input[aria-label="Material quantity"]',
+    )[i],
     String(newQty),
     "material qty (edit)",
   );
@@ -998,7 +974,7 @@ async function editBom() {
   const after = BomRepo.get(b.id);
   const target = after?.components.find((c) => c.itemId === b.components[i].itemId);
   assert(
-    !!target && close(target.qty, newQty),
+    !!target && (b.sizing ? target.qtyFormula === String(newQty) : close(target.qty, newQty)),
     `edit: ${b.components[i].itemName} should be ${newQty}, is ${target?.qty} — toasts ${JSON.stringify(toasts())}`,
   );
   if (dropped)
@@ -1036,8 +1012,28 @@ async function createProduction() {
     (o.textContent ?? "").includes(b.name),
   );
   if (!(await click(opt, `BOM option "${b.name}"`))) return;
-  const qty = pick([1, 2, 3, 5]);
-  await typeInto(dlg?.querySelector('input[aria-label="Quantity made"]'), String(qty), "qty made");
+  let qty = pick([1, 2, 3, 5]);
+  let madeAt: { w: number; h: number; pieces: number } | null = null;
+  if (b.sizing) {
+    // Made to measure: the size and pieces, and the qty follows from them.
+    madeAt = { w: pick([36, 48, 58, 72]), h: pick([35, 48, 60]), pieces: pick([1, 2]) };
+    await typeInto(dlg?.querySelector('input[aria-label="Width"]'), String(madeAt.w), "width");
+    await typeInto(dlg?.querySelector('input[aria-label="Height"]'), String(madeAt.h), "height");
+    await typeInto(
+      dlg?.querySelector('input[aria-label="Pieces"]'),
+      String(madeAt.pieces),
+      "pieces",
+    );
+    qty =
+      Number(
+        (dlg?.querySelector('input[aria-label="Quantity made"]') as HTMLInputElement | null)?.value,
+      ) || 0;
+  } else
+    await typeInto(
+      dlg?.querySelector('input[aria-label="Quantity made"]'),
+      String(qty),
+      "qty made",
+    );
   await clearToasts();
   await click(button(dlg, /^Save production$/), "Save production");
   await wait(300);
@@ -1046,7 +1042,19 @@ async function createProduction() {
   const run = runs.find((p) => p.bomId === b.id && p.qty === qty);
   if (!run) return;
   const byId = new Map(ItemRepo.all().map((i) => [i.id, i] as const));
-  for (const w of consumptionFor(b, qty, byId, true)) {
+  const expected = madeAt
+    ? consumptionForSize(
+        b,
+        { ...madeAt, unit: b.sizing?.formulaUnit ?? "in" },
+        madeAt.pieces,
+        byId,
+        {
+          constants: CompanyRepo.get().mtm?.constants,
+          roundUpWhole: true,
+        },
+      ).lines
+    : consumptionFor(b, qty, byId, true);
+  for (const w of expected) {
     const got = run.components.find((c) => c.itemId === w.itemId);
     assert(
       !!got && close(got.qty, w.qty),
