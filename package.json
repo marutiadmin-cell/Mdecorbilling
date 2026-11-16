@@ -20,6 +20,7 @@
     "test:screens": "node tests/run-screens.cjs",
     "test:monkey": "node tests/run-screens.cjs monkey",
     "test:fullshop": "node tests/run-screens.cjs fullshop",
+    "demo-data": "esbuild scripts/demo-data.ts --bundle --platform=node --format=cjs --alias:@=./src --external:firebase-admin --log-level=error --outfile=node_modules/.cache/demo-data.cjs && node node_modules/.cache/demo-data.cjs",
     "test": "npm run audit:ledger && npm run test:screens"
   },
   "dependencies": {
